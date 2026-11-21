@@ -1,0 +1,32 @@
+# Copy to sites.local.yaml (gitignored) and fill in. One entry per machine.
+# envs: one per environment kind a stage needs (stage.env): propp (parse_ner), vllm (qwen), quotes, rubriques,
+#       assemble, portrayal. A string is shell code that activates it; {squashfs, python_squashfs} mounts packed images
+#       (envs/pack_squashfs.sh), much faster to start on network filesystems.
+# stages: which partitions serve each stage, best first.
+sites:
+  mycluster:
+    ssh: mycluster                       # alias in ~/.ssh/config (ControlMaster socket opened beforehand)
+    code: /shared/me/ngramsci_nlp        # git checkout of this repo
+    work: /shared/me/ngramsci_work       # private store (text, token tables), scratch, outbox, logs
+    pre: |
+      export HF_HOME=/shared/me/.hf
+    models:
+      qwen: /shared/me/models/coref-4b         # ngramsci merge-qwen --out ...
+      rebel: /shared/me/models/rebel_pack      # barthez/ + rebel_state_dict.pt (GenderedNews, Zenodo 15228575)
+    envs:
+      propp: source /shared/me/envs/propp/bin/activate
+      vllm: {squashfs: /shared/me/envs/vllm.sqfs, python_squashfs: /shared/me/envs/uvpython.sqfs}
+      quotes: source /shared/me/envs/quotes/bin/activate
+    partitions:
+      v100: {sbatch: ["--partition=gpu_v100", "--gres=gpu:1", "-c 5", "--mem=24G", "--time=23:00:00"], gpu: v100, workers: 2, max_hours: 22.5}
+      h100: {sbatch: ["--partition=gpu_h100", "--gres=gpu:1", "-c 8", "--mem=64G", "--time=3-00:00:00"], gpu: h100, max_hours: 70}
+      cpu:  {sbatch: ["--partition=cpu", "-c 1", "--mem=6G", "--time=12:00:00"], max_hours: 11.5}
+    stages:
+      parse_ner: [v100]
+      qwen: [h100]
+      quotes: [v100]
+      assemble: [cpu]
+  saclay:                                # text source only (no scheduler)
+    ssh: saclay
+    code: /data/me/ngramsci_nlp
+    work: /data/me/ngramsci_work

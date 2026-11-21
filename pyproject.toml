@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ngramsci"
+version = "0.1.0"
+description = "French press NLP at scale: sections, people (NER + coreference), gender, quotes and portrayal, run across several HPC clusters"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "pyyaml",
+    "huggingface_hub>=0.30",
+    "pandas",
+    "pyarrow",
+    "numpy",
+]
+
+[project.optional-dependencies]
+# one extra per environment kind; a site builds one env per kind it serves (envs/build_env.sh)
+rubriques = ["torch", "transformers", "sentencepiece"]
+ner = ["torch", "transformers>=4.40,<5", "spacy>=3.8,<3.9", "spacy-curated-transformers", "propp-fr==0.1.0",
+       "TorchCRF==1.1.0", "sentencepiece", "scikit-learn"]
+qwen = ["vllm>=0.10"]
+quotes = ["torch", "transformers", "sentencepiece", "ctranslate2>=4.4"]
+assemble = ["propp-fr==0.1.0", "coreference==0.0.3", "spacy>=3.8,<3.9", "scikit-learn"]
+portrayal = ["torch", "transformers", "sentencepiece", "safetensors"]
+dev = ["pytest"]
+
+[project.scripts]
+ngramsci = "ngramsci.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["gpu: needs a GPU and the models (run on a cluster)"]

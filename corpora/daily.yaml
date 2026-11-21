@@ -1,0 +1,6 @@
+# Production: the new articles of a day (or a few days) as one shard, all stages in one process (`ngramsci run`).
+name: daily
+n_shards: 1
+params:
+  qwen: {single_process: true, eager: true}      # small batch: start-up matters more than throughput
+  quotes: {compute_type: float16}
