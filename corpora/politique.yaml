@@ -8,5 +8,5 @@ ttl_hours: {parse_ner: 3, qwen: 6}
 params:
   parse_ner: {k: 10}
   qwen: {single_process: true}
-  quotes: {compute_type: float16, split: truncate}
+  quotes: {compute_type: float16, split: chunks}
   portrayal: {seeds: [0, 1]}

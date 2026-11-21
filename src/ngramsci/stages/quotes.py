@@ -1,7 +1,7 @@
 """Quotes: speaker, cue and quote type with the GenderedNews REBEL model (BARThez fine-tuned on FRACAS, Ange Richard;
 checkpoint on Zenodo, record 15228575), run with CTranslate2 (beam 3, length-sorted batches; ~7x faster than HF).
-Input units: by default the article truncated to 512 BARThez tokens, as in the original pipeline; split="chunks"
-covers whole articles in pieces of <= 480 tokens cut at sentence ends.
+Input units: whole articles in pieces of <= 1,500 characters cut at sentence ends (split="chunks", default; the inputs
+of our earlier quote analyses were cut the same way), or split="truncate": the article cut at 512 BARThez tokens.
 One row per quote: content, quote_type, cue, source, source_type (+ the unit it came from)."""
 import os
 import re
@@ -48,20 +48,19 @@ def load(ctx):
     return tokenizer(pack), ctranslate2.Translator(ct2, device=dev, compute_type=ct)
 
 
-def units(text, tok, split="truncate", max_tok=480):
-    """[(unit_index, text)]: the article itself (truncated by the tokenizer) or sentence-cut chunks."""
+def units(text, tok=None, split="chunks", max_chars=1500):
+    """[(unit_index, text)]: sentence-cut pieces of <= max_chars, or the whole article (truncated by the tokenizer)."""
     text = text.replace("///", "\n", 1)
     if split != "chunks":
         return [(0, text)]
-    sents = re.split(r"(?<=[.!?»])\s+", text)
-    out, cur, n = [], [], 0
-    for s in sents:
-        L = len(tok(s, add_special_tokens=False)["input_ids"])
-        if cur and n + L > max_tok:
-            out.append(" ".join(cur)); cur, n = [], 0
-        cur.append(s); n += L
+    out, cur = [], ""
+    for s in re.split(r"(?<=[.!?»\n])\s+", text):
+        if cur and len(cur) + 1 + len(s) > max_chars:
+            out.append(cur); cur = s
+        else:
+            cur = f"{cur} {s}" if cur else s
     if cur:
-        out.append(" ".join(cur))
+        out.append(cur)
     return list(enumerate(out))
 
 
@@ -78,7 +77,7 @@ def to_quotes(rels):
 
 
 def predict(texts, tok, tr, batch=128, beam=3):
-    from ..nlp.rebel_parse import extract_triplets_rcv2
+    from ..nlp.rebel_parse import parse
     src = [tok.convert_ids_to_tokens(tok(t, truncation=True, max_length=512)["input_ids"]) for t in texts]
     order = sorted(range(len(src)), key=lambda i: -len(src[i])); preds = [None] * len(src)
     for s in range(0, len(order), batch):
@@ -87,15 +86,15 @@ def predict(texts, tok, tr, batch=128, beam=3):
                                  no_repeat_ngram_size=0, max_batch_size=batch)
         for i, r in zip(idx, res):
             ids = tok.convert_tokens_to_ids(r.hypotheses[0])
-            preds[i] = extract_triplets_rcv2("<s>" + tok.decode(ids, skip_special_tokens=False))
+            preds[i] = parse("<s>" + tok.decode(ids, skip_special_tokens=False))
     return preds
 
 
 def run(k, inp, out, state, ctx):
     tok, tr = state
     docs = read_text(inp["text"])
-    split = ctx.p("quotes", "split", "truncate")
-    us = [(d, u, t) for d, x in zip(docs["doc_id"], docs["text"]) for u, t in units(x, tok, split)]
+    split = ctx.p("quotes", "split", "chunks")
+    us = [(d, u, t) for d, x in zip(docs["doc_id"], docs["text"]) for u, t in units(x, tok, split, ctx.p("quotes", "max_chars", 1500))]
     preds = predict([t for _, _, t in us], tok, tr, batch=ctx.p("quotes", "batch", 128), beam=ctx.p("quotes", "beam", 3))
     rows = [dict(doc_id=d, unit=u, **q) for (d, u, _), p in zip(us, preds) for q in to_quotes(p)]
     cols = ["doc_id", "unit", "content", "quote_type", "cue", "source", "source_type"]

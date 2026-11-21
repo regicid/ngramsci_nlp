@@ -43,7 +43,6 @@ ngramsci status --corpus politique
 Corpora are YAML files in `corpora/`. Partitions marked `ask: true` (quota-limited hours) need `--yes`. On network
 filesystems, pack envs as squashfs (`envs/pack_squashfs.sh`) so that vLLM starts in minutes rather than half an hour.
 
-## Licences
+## Licence
 
-`ngramsci/nlp/rebel_parse.py` is AGPL-3.0 (from [genderednews-tools](https://github.com/getalp/genderednews-tools)).
-Portrayal annotation codebook: `docs/codebook_v4.md`.
+MIT. Portrayal annotation codebook: `docs/codebook_v4.md`.

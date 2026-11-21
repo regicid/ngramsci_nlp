@@ -82,3 +82,25 @@ def test_portrayal_targets():
     assert [(c, n, len(s)) for c, n, s in t] == [(0, "Marine Le Pen", 3)]                     # only her, whole chain
     assert targeted(text.replace("Marine Le Pen arrive", "Elle arrive"), ents, [("Marine Le Pen", name_re("Marine Le Pen"),
                     full_re("Marine Le Pen"))]) == []                                         # never named in full
+
+
+def test_rebel_parse():
+    from ngramsci.nlp.rebel_parse import parse
+    out = parse("<s><triplet> « Nous gagnerons »<dirquot> Paul Martin<per> cité<triplet> « Nous gagnerons »<dirquot> a déclaré<cue> indique</s>")
+    assert out == [{"head": "Paul Martin", "head_type": "<per>", "tail": "« Nous gagnerons »", "tail_type": "<dirquot>", "type": "cité"},
+                   {"head": "a déclaré", "head_type": "<cue>", "tail": "« Nous gagnerons »", "tail_type": "<dirquot>", "type": "indique"}]
+    assert to_quotes(out)[0]["cue"] == "a déclaré"
+    # a short group keeps the relation word in tail_type (reference parser's convention)
+    assert parse("<triplet> elle viendra<indquot> indique") == [
+        {"head": "", "head_type": "<indquot>", "tail": "elle viendra", "tail_type": "indique", "type": ""}]
+    assert parse("<s></s><pad>") == []
+    assert parse("<triplet> rien") == [{"head": "", "head_type": "", "tail": "rien", "tail_type": "", "type": ""}]
+
+
+def test_quote_units():
+    from ngramsci.stages.quotes import units
+    text = "Titre///" + " ".join(f"Phrase numéro {i} assez longue pour remplir." for i in range(100))
+    us = units(text, split="chunks", max_chars=300)
+    assert all(len(t) <= 300 for _, t in us) and len(us) > 10
+    assert " ".join(t for _, t in us).replace("\n", " ").split() == text.replace("///", " ").split()   # nothing lost
+    assert units(text, split="truncate") == [(0, text.replace("///", "\n", 1))]
