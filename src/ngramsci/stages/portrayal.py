@@ -16,6 +16,7 @@ from ..stage import Output, Stage, register
 from ..textio import read_text
 
 STOP = set("le la les l un une des du de au aux ce cet cette son sa ses".split())
+HONORIFIC = {"Mme", "Mmes", "Mlle", "Madame", "Mademoiselle", "Monsieur", "Messieurs", "Me", "Maître", "Mgr", "Dr", "Docteur", "Pr"}
 POSS = set("mon ma mes ton ta tes son sa ses notre nos votre vos leur leurs".split())
 
 
@@ -35,7 +36,8 @@ def full_name(surfaces):
     props = [t for t in surfaces if NAMEOK.match(t) and t.split()[0].lower().strip("'’") not in STOP]
     if not props:
         return None
-    return max(collections.Counter(props).items(), key=lambda kv: (kv[1], len(kv[0])))[0]
+    # « Ségolène Royal » over a more frequent « Mme Royal »: an honorific is not a first name (one person, one name)
+    return max(collections.Counter(props).items(), key=lambda kv: (kv[0].split()[0] not in HONORIFIC, kv[1], len(kv[0])))[0]
 
 
 def people(text, ents, min_mentions=1):
