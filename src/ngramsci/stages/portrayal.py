@@ -47,10 +47,27 @@ def people(text, ents, min_mentions=1):
     for ch, g in per.groupby("COREF"):
         if len(g) < min_mentions:
             continue
-        surf = [text[int(a):int(b)].replace("///", "").strip() for a, b, p in zip(g["onset"], g["offset"], g["prop"]) if p == "PROP"]
+        # a mention running across the title/body separator glues two names (« SarkozyNicolas Sarkozy »): not a name
+        surf = [text[int(a):int(b)].strip() for a, b, p in zip(g["onset"], g["offset"], g["prop"]) if p == "PROP"]
+        surf = [t for t in surf if "///" not in t]
         name = full_name(surf)
         if name:
             out.append((int(ch), name, [(int(a), int(b)) for a, b in zip(g["onset"], g["offset"])]))
+    return resolve_honorifics(out)
+
+
+def resolve_honorifics(found):
+    """« Mme Royal » -> « Ségolène Royal » when the article names exactly one person « <first name> Royal » (in another
+    chain): one person, one name across articles. Otherwise the honorific name is kept."""
+    full = [n for _, n, _ in found if n.split()[0] not in HONORIFIC]
+    out = []
+    for ch, name, spans in found:
+        first, *rest = name.split()
+        if first in HONORIFIC and rest:
+            cands = {n for n in full if n.endswith(" " + " ".join(rest)) and n != name}
+            if len(cands) == 1:
+                name = cands.pop()
+        out.append((ch, name, spans))
     return out
 
 
