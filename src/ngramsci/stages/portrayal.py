@@ -193,16 +193,21 @@ def load_targets(ctx):
     return [(n, name_re(n), full_re(n)) for n in dict.fromkeys(names)]
 
 
-def run(k, inp, out, state, ctx):
-    docs = read_text(inp["text"]).set_index("doc_id")
-    m = pd.read_parquet(inp["mentions"], columns=["doc_id", "start_token", "end_token", "onset", "offset"])
-    e = pd.read_parquet(inp["entities"], columns=["doc_id", "start_token", "end_token", "cat", "prop", "COREF", "POS_tag", "text"])
-    if ctx.p("portrayal", "exclude_possessive", False):
+def load_inputs(text_path, mentions_path, entities_path, exclude_possessive=False):
+    """(docs indexed by doc_id, entities with onset/offset): what run() and the family-name counts read."""
+    docs = read_text(text_path).set_index("doc_id")
+    m = pd.read_parquet(mentions_path, columns=["doc_id", "start_token", "end_token", "onset", "offset"])
+    e = pd.read_parquet(entities_path, columns=["doc_id", "start_token", "end_token", "cat", "prop", "COREF", "POS_tag", "text"])
+    if exclude_possessive:
         e = e[~possessive(e)]
     e["COREF"] = pd.to_numeric(e["COREF"], errors="coerce")
     for c in ("start_token", "end_token"):
         e[c] = pd.to_numeric(e[c], errors="coerce"); m[c] = m[c].astype(int)
-    e = e.merge(m, on=["doc_id", "start_token", "end_token"])
+    return docs, e.merge(m, on=["doc_id", "start_token", "end_token"])
+
+
+def run(k, inp, out, state, ctx):
+    docs, e = load_inputs(inp["text"], inp["mentions"], inp["entities"], ctx.p("portrayal", "exclude_possessive", False))
     rows, meta = [], []
     targets = load_targets(ctx)                       # none -> every person; else only these people
     for d, g in e.groupby("doc_id", sort=False):
