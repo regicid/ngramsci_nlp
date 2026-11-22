@@ -10,8 +10,8 @@ tags: [press, politics, stance, portrayal, french]
 
 How a French press passage portrays a **target person**: is the passage about them, is it negative or positive about them,
 does it frame them as extreme or moderate, does it show them rising or falling, and is the judgement the journalist's own.
-Five seeds of the same fine-tune; average their probabilities. Two seeds are enough: on the gold set the mean of any
-two seeds matches the five-seed ensemble (one seed alone loses 0.015–0.045 κ); production uses seeds 0 and 1.
+Three seeds of the same fine-tune; average their probabilities. Two seeds give almost the same results as three.
+The previous version (5 seeds, base training data only) is kept at revision `v1-5seeds-base`.
 
 Part of [ngramsci_nlp](https://github.com/regicid/ngramsci_nlp), which builds the inputs (people found by propp NER +
 Qwen coreference) and runs this model on whole corpora (stage `portrayal`).
@@ -44,26 +44,35 @@ s.score([{"title": "...", "passage": "Pour [[Dominique Martin]], la candidate d'
 
 ## Training and evaluation
 
-* Teacher labels: Claude Sonnet following the codebook, on 6,250 mention passages from French online press (2008–2026)
-  about the 2027 presidential candidates; 2,000 of them picked by active learning (rare classes: moderate framing,
-  decline, praise).
-* Training: 5,220 train / 941 validation rows (rows where the mention designates someone else were dropped), 12 epochs,
-  last epoch kept, fp16, CamemBERT-large, seeds 0–4.
-* Gold set: 596 mentions from 2026 articles kept out of training, labelled by the same teacher. Cohen's κ against the teacher
-  (single seeds, last epoch):
+* Teacher labels: Claude Sonnet following the codebook (v4). Training data (12,410 passages from French online press, 2008–2026):
+  * 6,250 mention passages about the 2027 presidential candidates, 2,000 of them picked by active learning (rare classes);
+  * 3,750 more candidate passages (v2);
+  * 2,410 passages about **other people** (politicians and non-politicians), many found only through coreference (v2).
+* 11,203 train rows after dropping rows where the mention designates someone else; 12 epochs, last epoch kept, fp16,
+  CamemBERT-large, LR 1.5e-5, seeds 0–2.
+* Evaluation sets, all kept out of training and labelled by the same teacher. Mean Cohen's κ over the five heads, ensemble of seeds:
 
-| | pertinent | valence | extremisme | dynamique | journaliste |
-|---|---|---|---|---|---|
-| κ (5 seeds) | 0.65–0.71 | 0.62–0.67 | 0.56–0.65 | 0.61–0.64 | 0.78–0.85 |
+| set | v1 (5 seeds) | v2 (3 seeds) |
+|---|---|---|
+| gold: 596 candidate mentions, 2026 | 0.691 | 0.729 |
+| A: 600 passages where the candidate is found by coreference | 0.531 | 0.616 |
+| B: 652 passages rich in rare classes | 0.723 | 0.743 |
+| C: 800 passages about 500 other people | 0.491 | 0.613 |
+
+Per head on gold (v2 ensemble): valence 0.69, extremisme 0.66, dynamique 0.68, pertinent 0.73, journaliste 0.89.
+On other people who are not politicians: valence 0.75, extremisme 0.86, journaliste 0.78, pertinent 0.61
+(Claude Opus against the teacher on the same rows: 0.84 / 0.90 / 0.84 / 0.47).
 
 For reference, Claude Opus against the Sonnet teacher on 200 gold mentions: valence 0.74, extremisme 0.77, dynamique 0.80,
-pertinent 0.73, journaliste 0.67. The gold set has few rare-class cases (5 moderate, 16 declining), so the κ of those
-classes is noisy (95 % CI ±0.06–0.12): judge the model on aggregates (candidate × period means), where it tracks the
-teacher closely.
+pertinent 0.73, journaliste 0.67. Rare classes are few in the gold set, so their κ is noisy: judge the model on aggregates
+(person × period means). Candidate-level correlation of mean valence with the teacher on gold: 0.79 (single seeds 0.72–0.79;
+it varies from 0.66 to 0.86 between seeds of the same recipe).
+
+Reliability of single passages vs averages per person (bias, how many mentions are needed): see [EVALUATION.md](EVALUATION.md).
 
 ## Limitations
 
-* Trained on politicians (2027 candidates). `valence`, `pertinent` and `journaliste` transfer reasonably to other people;
-  `extremisme` and `dynamique` are about political framing and the electoral race and mean little for non-politicians.
+* Trained mostly on politicians. `valence`, `extremisme` and `journaliste` work on other people too; `dynamique` (the electoral race)
+  is almost always neutral for non-politicians, and what counts as `pertinent` for them is ambiguous even between teachers.
 * Labels come from an LLM teacher, not from human coders; the model reproduces the teacher's reading of the codebook.
 * French online press only. The training passages are not released (copyrighted articles).
