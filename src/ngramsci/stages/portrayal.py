@@ -7,6 +7,7 @@ Output: one row per (article, chain, mention sentence) with the head probabiliti
 themselves are article text and are not written. Trained on politicians: see the model card for the heads that
 transfer to other people."""
 import collections
+import os
 import re
 
 import pandas as pd
@@ -28,8 +29,12 @@ def possessive(ents):
 
 def load(ctx):
     from ..portrayal import HUB, Scorer
-    return Scorer.from_hub(ctx.p("portrayal", "model", HUB), seeds=ctx.p("portrayal", "seeds", [0, 1]),
-                           revision=ctx.p("portrayal", "revision"))
+    sc = Scorer.from_hub(ctx.p("portrayal", "model", HUB), seeds=ctx.p("portrayal", "seeds", [0, 1]),
+                         revision=ctx.p("portrayal", "revision"))
+    f = ctx.p("portrayal", "surnames_file")                 # relative to the repo root
+    if f:
+        sc.surnames = Surnames.from_json(f if os.path.isabs(f) else os.path.join(os.path.dirname(__file__), "..", "..", "..", f))
+    return sc
 
 
 def full_name(surfaces):
@@ -40,9 +45,34 @@ def full_name(surfaces):
     return max(collections.Counter(props).items(), key=lambda kv: (kv[0].split()[0] not in HONORIFIC, kv[1], len(kv[0])))[0]
 
 
-def people(text, ents, min_mentions=1):
-    """[(chain id, full name, [(onset, offset)])] for the PER chains of one article."""
-    out = []
+SURNAME_RE = re.compile(r"^(?:(?:le|la|de|du|des|d['’])\s*)?[A-ZÀ-Ý][\w'’\-]+$", re.I)
+TITLES = {"M.", "M", "MM.", "Mme", "Mmes", "Mlle", "Madame", "Monsieur", "Me", "Maître", "Mgr", "Dr", "Pr"}
+
+
+def surname_of(name: str) -> str:
+    """« Jean-Luc Mélenchon » -> « Mélenchon », « Marine Le Pen » -> « Le Pen » (everything after the first name)."""
+    return name.split(" ", 1)[1] if " " in name else name
+
+
+def bare_surname(surfaces):
+    """Most frequent family name of a chain without a full name: « Mélenchon », « M. Mélenchon », « Le Pen »."""
+    c = collections.Counter()
+    for t in surfaces:
+        w = t.split()
+        if w and w[0] in TITLES:
+            w = w[1:]
+        t = " ".join(w)
+        if t and t[0].isupper() and SURNAME_RE.match(t) and t.split()[0].lower() not in ("son", "sa", "ses", "ce", "cette"):
+            c[t] += 1
+    return c.most_common(1)[0][0] if c else None
+
+
+def people(text, ents, min_mentions=1, surnames=None, year=None, only_surname=False):
+    """[(chain id, full name, [(onset, offset)])] for the PER chains of one article.
+    A chain with no « First Last » mention but a family name (« Mélenchon », « M. Mélenchon ») takes the article's one
+    « <first> Mélenchon » if there is exactly one, else the person `surnames` (Surnames) gives for that name and year.
+    only_surname: return only the chains named that way (to score them on top of an earlier run)."""
+    named, bare = [], []
     per = ents[(ents["cat"] == "PER") & ents["COREF"].notna()]
     for ch, g in per.groupby("COREF"):
         if len(g) < min_mentions:
@@ -50,10 +80,72 @@ def people(text, ents, min_mentions=1):
         # a mention running across the title/body separator glues two names (« SarkozyNicolas Sarkozy »): not a name
         surf = [text[int(a):int(b)].strip() for a, b, p in zip(g["onset"], g["offset"], g["prop"]) if p == "PROP"]
         surf = [t for t in surf if "///" not in t]
+        spans = [(int(a), int(b)) for a, b in zip(g["onset"], g["offset"])]
         name = full_name(surf)
         if name:
-            out.append((int(ch), name, [(int(a), int(b)) for a, b in zip(g["onset"], g["offset"])]))
-    return resolve_honorifics(out)
+            named.append((int(ch), name, spans))
+        elif surnames is not None or only_surname:
+            sn = bare_surname(surf)
+            if sn:
+                bare.append((int(ch), sn, spans))
+    named = resolve_honorifics(named)
+    from ..explorer import name_key
+    found = []
+    for ch, sn, spans in bare:
+        k = name_key(sn)
+        here = {n for _, n, _ in named if n.split()[0] not in HONORIFIC and name_key(surname_of(n)) == k}
+        name = here.pop() if len(here) == 1 else (surnames.get(k, year) if surnames is not None and not here else None)
+        if name:
+            found.append((ch, name, spans))
+    return found if only_surname else named + found
+
+
+class Surnames:
+    """Family name -> the one person it stands for in a given year: the first name holding >= `share` of the articles
+    naming someone « <first> <family name> » in year-1..year+1, with >= `min_n` such articles. `exclude`: family names
+    never resolved (Le Pen: Marine, Jean-Marie, Marion). Built from counts {(family key, year, full name): n articles}."""
+    def __init__(self, table: dict):
+        self.t = table                                   # {family key: {year: full name}}
+
+    def get(self, key, year):
+        return self.t.get(key, {}).get(int(year)) if year else None
+
+    @classmethod
+    def build(cls, counts: pd.DataFrame, share=0.9, min_n=20, window=1, exclude=("Le Pen",)):
+        """counts: columns key (family key), year, full_name, n."""
+        from ..explorer import name_key
+        ex = {name_key(x) for x in exclude}
+        c = counts[~counts["key"].isin(ex)]
+        c = c.assign(nk=c["full_name"].map(name_key))
+        disp = c.groupby("nk")["full_name"].agg(lambda s: s.value_counts().index[0])
+        g = c.groupby(["key", "year", "nk"])["n"].sum().reset_index()
+        parts = [g.assign(year=g["year"] + d) for d in range(-window, window + 1)]
+        w = pd.concat(parts).groupby(["key", "year", "nk"])["n"].sum().reset_index()
+        tot = w.groupby(["key", "year"])["n"].transform("sum")
+        top = w[w["n"] == w.groupby(["key", "year"])["n"].transform("max")].assign(tot=tot)
+        top = top[(top["n"] >= share * top["tot"]) & (top["tot"] >= min_n)].drop_duplicates(["key", "year"])
+        table: dict = {}
+        for r in top.itertuples():
+            table.setdefault(r.key, {})[int(r.year)] = disp[r.nk]
+        return cls(table)
+
+    def to_json(self, path):
+        import json
+        json.dump(self.t, open(path, "w"), ensure_ascii=False)
+
+    @classmethod
+    def from_json(cls, path):
+        import json
+        return cls({k: {int(y): n for y, n in v.items()} for k, v in json.load(open(path)).items()})
+
+
+def name_counts(rows: pd.DataFrame) -> pd.DataFrame:
+    """Portrayal-style rows (doc_id, full_name, year) -> {(family key, year, full name): articles}, honorific names out."""
+    from ..explorer import name_key
+    r = rows[["doc_id", "full_name", "year"]].drop_duplicates()
+    r = r[~r["full_name"].str.split().str[0].isin(HONORIFIC)]
+    r = r.assign(key=r["full_name"].map(lambda n: name_key(surname_of(n))))
+    return r.groupby(["key", "year", "full_name"]).size().rename("n").reset_index()
 
 
 def resolve_honorifics(found):
@@ -117,7 +209,10 @@ def run(k, inp, out, state, ctx):
         if d not in docs.index:
             continue
         text = docs.at[d, "text"]
-        found = targeted(text, g, targets) if targets else people(text, g, ctx.p("portrayal", "min_mentions", 1))
+        year = str(docs.at[d, "date"])[:4] if "date" in docs.columns else None
+        found = targeted(text, g, targets) if targets else people(
+            text, g, ctx.p("portrayal", "min_mentions", 1), surnames=getattr(state, "surnames", None),
+            year=int(year) if year and year.isdigit() else None, only_surname=ctx.p("portrayal", "only_surname", False))
         for ch, name, spans in found:
             for s in build(text, name_re(name), spans):
                 rows.append({"title": s["title"], "passage": s["passage"], "full_name": name})

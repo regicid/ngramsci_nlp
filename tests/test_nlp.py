@@ -104,3 +104,24 @@ def test_quote_units():
     assert all(len(t) <= 300 for _, t in us) and len(us) > 10
     assert " ".join(t for _, t in us).replace("\n", " ").split() == text.replace("///", " ").split()   # nothing lost
     assert units(text, split="truncate") == [(0, text.replace("///", "\n", 1))]
+
+
+def test_portrayal_family_names():
+    """« Mélenchon » alone: the article's « Jean-Luc Mélenchon », else the person the name stands for that year; Le Pen never."""
+    from ngramsci.stages.portrayal import Surnames, bare_surname, people
+    counts = pd.DataFrame([("melenchon", 2017, "Jean-Luc Mélenchon", 95), ("melenchon", 2017, "Sophie Mélenchon", 2),
+                           ("martin", 2017, "Paul Martin", 30), ("martin", 2017, "Jean Martin", 25),
+                           ("le pen", 2017, "Marine Le Pen", 500)], columns=["key", "year", "full_name", "n"])
+    sn = Surnames.build(counts)
+    assert sn.get("melenchon", 2017) == sn.get("melenchon", 2018) == "Jean-Luc Mélenchon"       # ±1 year window
+    assert sn.get("melenchon", 2020) is None and sn.get("martin", 2017) is None and sn.get("le pen", 2017) is None
+    assert bare_surname(["M. Mélenchon", "Mélenchon", "le leader insoumis"]) == "Mélenchon"
+    text = "Mélenchon à Lyon///M. Mélenchon parle. Il rencontre Paul Martin. Martin répond."
+    on = lambda s: text.index(s)
+    ents = pd.DataFrame({"cat": ["PER"] * 5, "COREF": [0, 0, 0, 1, 2], "prop": ["PROP", "PROP", "PRON", "PROP", "PROP"],
+                         "onset": [on("Mélenchon"), on("M. Mélenchon"), on("Il"), on("Paul"), on("Martin répond")],
+                         "offset": [on("Mélenchon") + 9, on("M. Mélenchon") + 12, on("Il") + 2, on("Paul") + 11, on("Martin répond") + 6]})
+    got = {(c, n) for c, n, _ in people(text, ents, surnames=sn, year=2017)}
+    assert got == {(0, "Jean-Luc Mélenchon"), (1, "Paul Martin"), (2, "Paul Martin")}          # 2: the article's Martin
+    assert {n for _, n, _ in people(text, ents)} == {"Paul Martin"}                             # old behaviour without table
+    assert {c for c, _, _ in people(text, ents, surnames=sn, year=2017, only_surname=True)} == {0, 2}

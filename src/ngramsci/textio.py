@@ -7,9 +7,12 @@ import pandas as pd
 
 
 def read_text(path: str, min_chars: int = 4) -> pd.DataFrame:
-    with gzip.open(path, "rt", encoding="utf-8") as f:
-        rows = [json.loads(l) for l in f if l.strip()]
-    df = pd.DataFrame(rows)
+    """jsonl.gz (saclay scrape) or parquet (Le Monde shards: row, doc_id, url, date, section, text)."""
+    if path.endswith(".parquet"):
+        df = pd.read_parquet(path)
+    else:
+        with gzip.open(path, "rt", encoding="utf-8") as f:
+            df = pd.DataFrame([json.loads(l) for l in f if l.strip()])
     if df.empty:
         return pd.DataFrame(columns=["doc_id", "text"])
     df["doc_id"] = df["doc_id"].astype(str)
