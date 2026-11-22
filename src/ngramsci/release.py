@@ -28,7 +28,7 @@ def outlet(doc_id: pd.Series) -> pd.Series:
 
 def with_meta(t: pd.DataFrame, dates: pd.Series, newspaper=None) -> pd.DataFrame:
     t = t.copy()
-    t["newspaper"] = newspaper or outlet(t["doc_id"].astype(str))
+    t["newspaper"] = (pd.Series(newspaper, index=t.index) if newspaper else outlet(t["doc_id"].astype(str))).astype(object)
     t.insert(t.columns.get_loc("doc_id") + 1, "date", t["doc_id"].map(dates).astype("string").str[:10])
     return t
 

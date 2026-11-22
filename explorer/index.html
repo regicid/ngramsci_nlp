@@ -185,7 +185,7 @@ td { font-family: var(--f-data); }
           <option value="50">50 articles</option><option value="200">200 articles</option><option value="500" selected>500 articles</option>
           <option value="2000">2,000 articles</option><option value="10000">10,000 articles</option></select></div>
         <div class="field"><span>Sort by</span><div class="seg" id="rk-sort" role="group" aria-label="Sort ranking by">
-          <button type="button" data-k="n" aria-pressed="true">Articles</button><button type="button" data-k="valence" aria-pressed="false">Valence</button>
+          <button type="button" data-k="n" aria-pressed="false">Articles</button><button type="button" data-k="valence" aria-pressed="true">Valence</button>
           <button type="button" data-k="extremisme" aria-pressed="false">Radical</button><button type="button" data-k="dynamique" aria-pressed="false">Momentum</button></div></div>
       </div></div>
     <div class="sub" id="rk-sub">Loading the ranking…</div>
@@ -212,7 +212,7 @@ td { font-family: var(--f-data); }
 
 <script>
 (() => {
-const OUTLET_NAMES = {"lemonde":"Le Monde","20minutes":"20 Minutes","atlantico":"Atlantico","bfmtv":"BFMTV","blast":"Blast","challenges":"Challenges","cnews":"CNews",
+const OUTLET_NAMES = {"lemonde_politique":"Le Monde · politique","lemonde_autres":"Le Monde · other sections","20minutes":"20 Minutes","atlantico":"Atlantico","bfmtv":"BFMTV","blast":"Blast","challenges":"Challenges","cnews":"CNews",
   "francesoir":"FranceSoir","l_opinion":"L'Opinion","la_croix":"La Croix","la_depeche":"La Dépêche","laprovence":"La Provence","latribune":"La Tribune",
   "le_capital":"Capital","le_courrier_de_l_ouest":"Le Courrier de l'Ouest","le_figaro":"Le Figaro","le_journal_du_dimanche":"Le JDD",
   "le_maine_libre":"Le Maine Libre","le_nouvel_observateur":"L'Obs","le_telegramme":"Le Télégramme","leparisien":"Le Parisien","les_echos":"Les Échos",
@@ -506,7 +506,7 @@ function drawSummary(data) {
 }
 
 // ranking: the most mentioned people of the selected period and newspapers, three panels sharing the row order
-const RK = {data: null, by: null, n: 40, min: 500, sort: "n", loading: null};
+const RK = {data: null, by: null, n: 40, min: 500, sort: "valence", loading: null};
 function loadRanking() {
   if (!RK.loading) RK.loading = fetch("ranking.json").then(r => { if (!r.ok) throw new Error("ranking.json " + r.status); return r.json(); }).then(d => {
     RK.data = d; RK.by = new Map(); d.i.forEach((v, j) => (RK.by.get(v) || RK.by.set(v, []).get(v)).push(j)); });
