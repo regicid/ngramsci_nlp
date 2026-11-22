@@ -141,6 +141,9 @@ def run(k, inp, out, state, ctx):
         ent_dfs += e; char_rows += r; st.update(c)
         for m in errs:
             ctx.log(m)
+    bad = st["errors"] + st["no_tokens"]
+    if ids and bad > ctx.p("assemble", "max_error_rate", 0.05) * len(ids):    # e.g. tokens not lining up: fail, publish nothing
+        raise RuntimeError(f"assemble shard {k}: {bad}/{len(ids)} articles failed (errors {st['errors']}, no tokens {st['no_tokens']})")
     if ent_dfs:
         pq.write_table(ent_table(ent_dfs), out["entities"], compression="zstd")
     else:
