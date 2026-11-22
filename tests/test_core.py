@@ -114,13 +114,15 @@ def test_run_local(tmp_path):
 class FakeApi:
     """In-memory stand-in for HfApi: list_repo_tree + create_commit."""
     def __init__(self):
-        self.files = {}; self.commits = 0
+        self.files = {}; self.commits = 0; self.fail = 0         # fail: next n commits raise (HTTP 429)
 
     def list_repo_tree(self, repo, repo_type=None, path_in_repo=""):
         p = path_in_repo.rstrip("/") + "/"
         return [SimpleNamespace(path=f) for f in self.files if f.startswith(p) and "/" not in f[len(p):]]
 
     def create_commit(self, repo, repo_type=None, operations=(), commit_message=""):
+        if self.fail:
+            self.fail -= 1; raise RuntimeError("429 Client Error: Too Many Requests")
         self.commits += 1
         for op in operations:
             if type(op).__name__ == "CommitOperationDelete":
@@ -149,6 +151,45 @@ def test_hub_claim_race_and_batching(tmp_path):
     assert api.commits == n0 + 1
     assert "qwen_k10/shard_00005.ner.jsonl.gz" in api.files
     assert not any(f.startswith("claims/qwen/shard_00005") for f in api.files)
+
+
+def test_hub_batch_claims_timed_flush_and_backoff(tmp_path):
+    api = FakeApi()
+    a = HubStore("r", str(tmp_path / "ob"), api=api); a.who = "a"; a.LIST_EVERY = 0
+    b = HubStore("r", str(tmp_path / "ob2"), api=api); b.who = "b"; b.LIST_EVERY = 0
+    assert a.claim_many("p", [1, 2, 3], 6) == [1, 2, 3] and api.commits == 1        # one commit, three claims
+    assert b.claim_many("p", [3, 4], 6) == [4]                                        # 3 is a's
+    o = S.Output("q", "p/shard_{k:05d}.parquet")
+    src = tmp_path / "x"; src.write_bytes(b"x")
+    a.publish("p", 1, [(o, str(src))], o)
+    n0 = api.commits
+    assert not a.flush(force=False) and api.commits == n0                           # unforced: too soon
+    a._last -= a.MIN_INTERVAL + 1
+    assert a.flush(force=False) and "p/shard_00001.parquet" in api.files
+    assert not any(f.startswith("claims/p/shard_00001") for f in api.files)          # released with its output
+    api.fail = 1
+    assert a.claim_many("p", [5], 6) is None and a.wait_s() > 50
+    assert not a.flush() and api.commits == n0 + 1                                   # backing off: no call at all
+    a._next_ok = 0
+    assert a.claim_many("p", [5], 6) == [5]
+
+
+def test_worker_batches_on_a_rate_limited_hub(tmp_path):
+    """Workers on a hub board: shards are claimed in batches, a 429 makes them wait instead of hammering."""
+    api = FakeApi()
+    corpus = Corpus(name="toy", n_shards=6)
+    pa = DiskStore(str(tmp_path / "privA"))
+    for k in range(6):
+        _text(str(tmp_path / "privA"), k)
+    hub = HubStore("r", str(tmp_path / "ob"), api=api); hub.LIST_EVERY = 0
+    w = Worker(corpus, Site(name="A", ssh=None, code=".", work=str(tmp_path / "A")), ["t_upper"], board=hub, private=pa,
+               poll=0)
+    w.secs["t_upper"] = [1.0]; w.batch_s = 3.0                                     # batches of 3 shards
+    api.fail = 1; hub.MAX_BACKOFF = 0
+    w.loop()
+    assert hub.done(S.get("t_upper").done_output, refresh=True) == {0, 1, 2, 3, 4, 5}
+    assert api.commits == 3                      # claim 0-2, claim 3-5 (+ outputs 0-2), final push of 3-5
+    assert not hub.claims("t_upper")
 
 
 def test_launch_render():

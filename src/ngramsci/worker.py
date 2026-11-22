@@ -2,6 +2,8 @@
 
 Loop: pick a (stage, shard) whose done-output is missing, whose inputs exist (public ones on the board, private ones
 in this site's private store) and that nobody claimed recently -> claim -> fetch inputs -> run -> publish -> repeat.
+Shards are claimed in batches of about --batch-minutes of work (sized from this worker's measured shard times; one
+shard until a first one is timed), so a worker commits to the hub about once per batch.
 Workers start at different shards (--start) and wrap around, so they spread over the shards and then steal what is
 left. A worker exits when every shard of its stages is done, or before --max-hours so a Slurm limit never kills it
 half-way (partial work stays in its scratch dir and is resumed by the next worker on this site).
@@ -26,7 +28,7 @@ def _log(msg):
 
 class Worker:
     def __init__(self, corpus, site, stage_names, start=0, reverse=False, max_hours=23.0, poll=300,
-                 max_shards=None, board=None, private=None, shards=None):
+                 max_shards=None, board=None, private=None, shards=None, batch_minutes=30.0, max_batch=20):
         self.c, self.site = corpus, site
         self.stages = [S.get(n) for n in stage_names]
         self.board = board or make_board(corpus, site)
@@ -40,6 +42,9 @@ class Worker:
         self.t0, self.max_s, self.poll = time.time(), max_hours * 3600, poll
         self.max_shards, self.n_done = max_shards, 0
         self.states, self.failed = {}, set()
+        self.batch_s, self.max_batch = batch_minutes * 60, max_batch
+        self.queue: list = []                                 # (stage, k) claimed by us, not started yet
+        self.secs: dict[str, list[float]] = {}               # stage -> seconds per shard, measured here
         self.work = site.work if site else "."
 
     # where things are --------------------------------------------------------------------------------------
@@ -61,7 +66,25 @@ class Worker:
         return os.path.isdir(d) and any(os.scandir(d))
 
     # picking -----------------------------------------------------------------------------------------------
+    def batch_size(self, st) -> int:
+        t = self.secs.get(st.name)
+        if not t:
+            return 1
+        return max(1, min(self.max_batch, round(self.batch_s / (sum(t) / len(t)))))
+
+    def release_queue(self):
+        for st, k in self.queue:
+            self.claimer(st).release(st.name, k)
+        self.queue = []
+
     def pick(self):
+        """(stage, k, waiting): the next shard of our queue, else a newly claimed batch. stage None and waiting True:
+        inputs are missing, or the board could not be reached (retry later)."""
+        while self.queue:
+            st, k = self.queue.pop(0)
+            if k not in self.store_of(st.done_output).done(st.done_output):
+                return st, k, False
+            self.claimer(st).release(st.name, k)             # finished elsewhere meanwhile
         waiting = False
         for st in self.stages:
             done = self.store_of(st.done_output).done(st.done_output)
@@ -81,16 +104,24 @@ class Worker:
             # Partial work left on this site goes first, but it is claimed like any other shard: a non-empty scratch
             # dir may belong to a worker still running it (two workers on one shard -> the first to finish deletes
             # the dir under the other). A worker stopping at its deadline releases its claim, so resuming is immediate.
-            for k in sorted(todo, key=lambda k: not self.mine(st, k)):
-                if k not in ready:
-                    continue
-                c = claims.get(k)
-                if c and time.time() - c[0] < ttl * 3600:
-                    continue
-                if cl.claim(st.name, k, ttl):
-                    if k in self.store_of(st.done_output).done(st.done_output, refresh=True):
-                        cl.release(st.name, k); continue      # finished meanwhile (our listing was cached)
-                    return st, k, waiting
+            free = [k for k in sorted(todo, key=lambda k: not self.mine(st, k))
+                    if k in ready and not (claims.get(k) and time.time() - claims[k][0] < ttl * 3600)]
+            if not free:
+                continue
+            won = cl.claim_many(st.name, free[:self.batch_size(st)], ttl)
+            if won is None:
+                return None, None, True                       # board unreachable (e.g. HTTP 429): retry later
+            done = self.store_of(st.done_output).done(st.done_output, refresh=True)
+            for k in won:
+                if k in done:
+                    cl.release(st.name, k)                    # finished meanwhile (our listing was cached)
+                else:
+                    self.queue.append((st, k))
+            if self.queue:
+                _log(f"{st.name}: claimed {[k for _, k in self.queue]}")
+                st, k = self.queue.pop(0)
+                return st, k, waiting
+            return None, None, True                           # lost every race: look again
         return None, None, waiting
 
     # running -----------------------------------------------------------------------------------------------
@@ -112,6 +143,7 @@ class Worker:
         out = {o.name: os.path.join(outdir, f"{o.name}__{os.path.basename(o.path(k, self.c.layout))}") for o in st.outputs}
         t = time.time()
         info = st.run(k, inp, out, self.state(st, ctx), ctx) or {}
+        self.secs.setdefault(st.name, []).append(time.time() - t)
         info.update(seconds=round(time.time() - t), who=getattr(self.board, "who", ""), stage=st.name, shard=k)
         missing = [n for n, p in out.items() if not os.path.exists(p)]
         if missing:
@@ -138,13 +170,19 @@ class Worker:
                 _log("max hours reached"); break
             if self.max_shards is not None and self.n_done >= self.max_shards:
                 break
-            st, k, waiting = self.pick()
+            try:
+                st, k, waiting = self.pick()
+            except RuntimeError as e:                             # listing failed after retries (hub rate limit)
+                _log(f"pick failed ({e}), retrying in {self.poll}s"); time.sleep(self.poll); continue
             if st is None:
                 if not waiting:
                     _log("ALL SHARDS DONE"); break
-                self.board.flush(); _log(f"waiting for inputs ({self.poll}s)"); time.sleep(self.poll); continue
+                self.board.flush(force=False)
+                wait = max(self.poll, getattr(self.board, "wait_s", lambda: 0)())
+                _log(f"waiting for inputs or the board ({wait:.0f}s)"); time.sleep(wait); continue
             try:
                 self.run_one(st, k); self.n_done += 1; fails = 0
+                self.board.flush(force=False)                     # timed: outputs of a long batch still go out
             except S.Deadline:
                 _log(f"{st.name} shard {k}: stopped at the deadline, partial work kept")
                 self.claimer(st).release(st.name, k); break
@@ -153,10 +191,11 @@ class Worker:
                 self.failed.add((st.name, k)); self.claimer(st).release(st.name, k)
                 if fails >= 3:
                     _log("3 failures in a row, exiting"); break
+        self.release_queue()
         for _ in range(12):                                      # last outputs must reach the board
             if self.board.flush():
                 break
-            time.sleep(300)
+            time.sleep(max(60, getattr(self.board, "wait_s", lambda: 0)()))
 
 
 def run_local(corpus, stage_names, root, shards=(0,), site=None):

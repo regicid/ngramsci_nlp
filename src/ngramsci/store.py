@@ -2,8 +2,11 @@
 
 * DiskStore — a directory (a shared disk on one cluster, or a site's private store). Claims are mkdir locks.
 * HubStore  — a private HF dataset repo, the board shared by all machines. Outputs wait in an on-disk outbox and
-  are committed in batches: the hub allows 128 commits/hour per repo, so a worker makes one commit per shard
-  (outputs of shard k + release of its claim + claim of the next shard). Claims are files
+  are committed in batches: the hub allows 128 commits/hour per repo, and fast shards with ~20 workers exceed it
+  at one commit per shard (2026-11-22: every commit got HTTP 429 and the run stalled). So a worker claims a batch
+  of shards (~30 min of work) in one commit, and its outputs + claim releases ride on the next batch claim; the
+  outbox is otherwise pushed at most every MIN_INTERVAL s, and after a failed commit nothing is sent until a
+  backoff (doubling, up to 30 min) has passed. Claims are files
   claims/<stage>/shard_K__<unix time>__<who>: one listing gives who claimed what and when, without per-file calls.
   Claims are not atomic: after claiming, a worker re-lists and backs off if an older live claim exists (the only
   cost of a race is one duplicated shard).
@@ -52,9 +55,12 @@ class Store:
     def done(self, o: Output, refresh: bool = False) -> set[int]: ...
     def fetch(self, o: Output, k: int, dest: str) -> str: ...
     def publish(self, stage: str, k: int, files: list[tuple[Output, str]], done: Output): ...
-    def flush(self, claim: tuple[str, int] | None = None) -> bool: ...
+    def flush(self, claim: tuple[str, int] | None = None, force: bool = True) -> bool: ...
     def claims(self, stage: str) -> dict[int, tuple[float, str]]: ...
     def claim(self, stage: str, k: int, ttl_h: float) -> bool: ...
+    def claim_many(self, stage: str, ks: list[int], ttl_h: float) -> list[int] | None:
+        """Claim several shards at once; returns those won (None: the board could not be reached)."""
+        return [k for k in ks if self.claim(stage, k, ttl_h)]
     def release(self, stage: str, k: int): ...
 
 
@@ -88,7 +94,7 @@ class DiskStore(Store):
             os.replace(dst + ".tmp", dst)
         self.release(stage, k)
 
-    def flush(self, claim=None):
+    def flush(self, claim=None, force=True):
         if claim:
             return self.claim(claim[0], claim[1], 1e9)
         return True
@@ -138,6 +144,8 @@ class DiskStore(Store):
 class HubStore(Store):
     """Private HF dataset repo as the board. outbox: local dir (persistent) holding files not yet committed."""
     LIST_EVERY = 120                      # s: listings are cached this long (1000 API calls / 5 min per account)
+    MIN_INTERVAL = 1800                   # s: unforced flushes (outputs only) at most this often
+    MAX_BACKOFF = 1800                    # s: after a failed commit, wait 60 s, 120 s, ... up to this
 
     def __init__(self, repo: str, outbox: str, layout: dict | None = None, api=None):
         from huggingface_hub import HfApi
@@ -146,6 +154,8 @@ class HubStore(Store):
         self._cache: dict[str, tuple[float, list[str]]] = {}
         self._pending_ops: list = []      # claim deletions/additions to send with the next commit
         self._released: set = set()
+        self._last = time.time()          # last successful commit (start counts: no push right after launch)
+        self._next_ok, self._backoff = 0.0, 0.0
         self.adopt_orphans(outbox)
 
     # listings ----------------------------------------------------------------------------------------------
@@ -212,30 +222,42 @@ class HubStore(Store):
     def _outbox_files(self):
         return [os.path.join(r, f) for r, _, fs in os.walk(self.outbox) for f in fs]
 
-    def flush(self, claim=None):
-        """One commit: everything in the outbox + pending claim releases + (optionally) a new claim.
-        On failure (e.g. HTTP 429) the outbox is kept and the call returns False."""
-        from huggingface_hub import CommitOperationAdd, CommitOperationDelete
+    def flush(self, claim=None, force=True):
+        """One commit: everything in the outbox + pending claim releases + (optionally) new claims.
+        claim: (stage, k) or (stage, [k, ...]). Unforced calls commit only every MIN_INTERVAL s. No call commits
+        during the backoff after a failure (e.g. HTTP 429): the outbox is kept and the call returns False."""
+        from huggingface_hub import CommitOperationAdd
+        now = time.time()
+        if now < self._next_ok or (not force and now - self._last < self.MIN_INTERVAL):
+            return False
         files = self._outbox_files()
         ops = [CommitOperationAdd(os.path.relpath(f, self.outbox), f) for f in files]
         ops += self._pending_ops
-        name = None
+        ks = []
         if claim:
-            name = f"claims/{claim[0]}/{shard_name(claim[1])}__{int(time.time())}__{self.who}"
-            ops.append(CommitOperationAdd(name, self.who.encode()))
+            ks = claim[1] if isinstance(claim[1], (list, tuple)) else [claim[1]]
+            ops += [CommitOperationAdd(f"claims/{claim[0]}/{shard_name(k)}__{int(now)}__{self.who}", self.who.encode())
+                    for k in ks]
         if not ops:
             return True
         try:
             self.api.create_commit(self.repo, repo_type="dataset", operations=ops,
-                                   commit_message=f"{self.who}: {len(files)} files" + (f", claim {claim[0]} {claim[1]}" if claim else ""))
+                                   commit_message=f"{self.who}: {len(files)} files" + (f", claim {claim[0]} {ks}" if claim else ""))
         except Exception as e:
-            print(f"commit failed ({type(e).__name__}: {str(e)[:120]}); outbox kept", flush=True)
+            self._backoff = min(max(2 * self._backoff, 60), self.MAX_BACKOFF); self._next_ok = time.time() + self._backoff
+            print(f"commit failed ({type(e).__name__}: {str(e)[:120]}); outbox kept, next try in {self._backoff:.0f}s",
+                  flush=True)
             return False
         for f in files:
             os.remove(f)
         self._pending_ops = []
         self._cache.clear()
+        self._last, self._backoff = time.time(), 0.0
         return True
+
+    def wait_s(self) -> float:
+        """Seconds until a commit may be attempted again (0 if not backing off)."""
+        return max(0.0, self._next_ok - time.time())
 
     # claims ------------------------------------------------------------------------------------------------
     def claims(self, stage):
@@ -251,17 +273,25 @@ class HubStore(Store):
         return out
 
     def claim(self, stage, k, ttl_h):
-        c = self.claims(stage).get(k)
-        if c and time.time() - c[0] < ttl_h * 3600 and c[1] != self.who:
-            return False
-        if not self.flush(claim=(stage, k)):
-            return False
-        c = self.claims(stage).get(k)                               # race check: oldest live claim wins
-        live = c and time.time() - c[0] < ttl_h * 3600
-        if live and c[1] != self.who:
-            self.release(stage, k)
-            return False
-        return True
+        return bool(self.claim_many(stage, [k], ttl_h))
+
+    def claim_many(self, stage, ks, ttl_h):
+        """One commit claims all of ks (and pushes the outbox); returns the shards won, None if the commit failed."""
+        live = lambda c: c and time.time() - c[0] < ttl_h * 3600
+        cl = self.claims(stage)
+        ks = [k for k in ks if not (live(cl.get(k)) and cl[k][1] != self.who)]
+        if not ks:
+            return []
+        if not self.flush(claim=(stage, ks)):
+            return None
+        cl = self.claims(stage)                                     # race check: oldest live claim wins
+        won = []
+        for k in ks:
+            if live(cl.get(k)) and cl[k][1] != self.who:
+                self.release(stage, k)
+            else:
+                won.append(k)
+        return won
 
     def release(self, stage, k):
         """Delete our claim files for (stage, k) in the next commit."""

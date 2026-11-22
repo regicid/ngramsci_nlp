@@ -29,7 +29,7 @@ def cmd_work(a):
     from .worker import Worker
     corpus = C.load_corpus(a.corpus); site = C.local_site(_sites(a), a.site)
     Worker(corpus, site, a.stages.split(","), start=a.start, reverse=a.reverse, max_hours=a.max_hours, poll=a.poll,
-           max_shards=a.max_shards).loop()
+           max_shards=a.max_shards, batch_minutes=a.batch_minutes).loop()
 
 
 def cmd_run(a):
@@ -146,6 +146,7 @@ def main(argv=None):
     p.add_argument("--start", type=int, default=0); p.add_argument("--reverse", action="store_true")
     p.add_argument("--max-hours", type=float, default=23.0); p.add_argument("--poll", type=int, default=300)
     p.add_argument("--max-shards", type=int)
+    p.add_argument("--batch-minutes", type=float, default=30.0, help="claim about this much work per hub commit")
 
     p = sp.add_parser("run"); p.set_defaults(f=cmd_run)
     p.add_argument("--corpus", required=True); p.add_argument("--stages", required=True); p.add_argument("--root", required=True)
