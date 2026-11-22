@@ -59,6 +59,34 @@ def cells(port: pd.DataFrame, dates: pd.Series) -> pd.DataFrame:
     return out, names
 
 
+def cells_from_characters(ch: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """The same cells as cells(), from a release characters file (one row per character: portrayal_n passages with mean
+    P(pertinent) and weighted means), so the page shows exactly what is published. Characters of one name in one article
+    are one article, as in cells()."""
+    d = ch[ch["portrayal_n"] > 0][["doc_id", "date", "newspaper", "full_name", "portrayal_n", "portrayal_pertinent"]
+                                  + [f"portrayal_{k}" for k in DIMS]].copy()
+    d["key"] = d["full_name"].map(name_key)
+    d = d[d["key"] != ""]
+    d["W"] = d["portrayal_pertinent"].astype(float) * d["portrayal_n"]
+    for k in DIMS:
+        d[f"x_{k}"] = d[f"portrayal_{k}"].astype(float).fillna(0) * d["W"]
+    g = d.groupby(["key", "doc_id"], sort=False)
+    per = g[["W"] + [f"x_{k}" for k in DIMS]].sum()
+    per["n_seg"] = g["portrayal_n"].sum()
+    first = g[["date", "newspaper"]].first()
+    per = per.join(first).reset_index()
+    per["month"] = per["date"].str[:7]
+    per = per.dropna(subset=["month"]).rename(columns={"newspaper": "outlet"})
+    per["WW"] = per["W"] ** 2
+    for k in DIMS:
+        x = per.pop(f"x_{k}")
+        per[f"S_{k}"], per[f"SS_{k}"], per[f"WS_{k}"] = x, x ** 2, per["W"] * x
+    per["n_docs"] = 1
+    out = per.drop(columns=["doc_id", "date"]).groupby(["key", "month", "outlet"], sort=False).sum().reset_index()
+    names = d.groupby(["key", "full_name"]).size().rename("n").reset_index()
+    return out, names
+
+
 def merge(parts) -> tuple[pd.DataFrame, pd.DataFrame]:
     cs, ns = zip(*parts)
     c = pd.concat(cs).groupby(["key", "month", "outlet"], sort=False).sum().reset_index()

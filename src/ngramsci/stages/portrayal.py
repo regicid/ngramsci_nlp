@@ -108,13 +108,15 @@ def people(text, ents, min_mentions=1, surnames=None, year=None, only_surname=Fa
 # words found before a family name that are not first names (« Général de Gaulle », « Vive de Gaulle », « Lycée Jaurès »)
 NOT_FIRST = set("general president presidente vive marechal amiral colonel commandant capitaine lieutenant ministre senateur "
                 "depute maire professeur pere abbe cardinal saint sainte mines lycee college rue place avenue boulevard quai "
-                "aeroport fondation institut centre hopital ecole universite pont stade gare".split())
+                "aeroport fondation institut centre hopital ecole universite pont stade gare "
+                # names the NER takes for people (« Debout la France », « Downing Street »…), found in the table 2026-11-22
+                "debout downing scotland boko bottega correspondant correspondante nuit".split())
 
 
 class Surnames:
     """Family name -> the one person it stands for in a given year: the first name holding >= `share` of the articles
     naming someone « <first> <family name> » in year-1..year+1, with >= `min_n` such articles. `exclude`: family names
-    never resolved (Le Pen: Marine, Jean-Marie, Marion). A family name that is also a first name (used as one in >= 10% as
+    never resolved (Le Pen: Marine, Jean-Marie, Marion; places the NER may take for people). A family name that is also a first name (used as one in >= 10% as
     many articles: Philippe, Bertrand, Laurent) is never resolved either: a bare « Philippe » is usually someone's first
     name. Built from counts {(family key, year, full name): n articles}."""
     def __init__(self, table: dict):
@@ -124,7 +126,8 @@ class Surnames:
         return self.t.get(key, {}).get(int(year)) if year else None
 
     @classmethod
-    def build(cls, counts: pd.DataFrame, share=0.9, min_n=20, window=1, exclude=("Le Pen",)):
+    def build(cls, counts: pd.DataFrame, share=0.9, min_n=20, window=1,
+              exclude=("Le Pen", "Marseille", "Paris", "Lyon", "Toulouse", "Nice", "Bordeaux", "France")):
         """counts: columns key (family key), year, full_name, n."""
         from ..explorer import name_key
         ex = {name_key(x) for x in exclude}

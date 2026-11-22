@@ -81,6 +81,10 @@ def characters(chars: pd.DataFrame, port: pd.DataFrame, dates: pd.Series, source
     if sources is not None:
         sc = sources.rename(columns={"chain": "char_id", "full_name": "src_name"})
         pc = pc.merge(sc, on=["doc_id", "char_id"], how="left")
+        # a family name the current table no longer resolves (it was scored with an earlier, looser table): unscored
+        gone = pc["src_name"].isna()
+        pc, port = pc[~gone], port[~port.set_index(["doc_id", "chain"]).index.isin(pc[gone].set_index(["doc_id", "char_id"]).index)]
+        characters.dropped = int(gone.sum())
         bad = pc["src_name"].ne(pc["full_name"])
         if bad.any():
             raise ValueError(f"{int(bad.sum())} characters named differently than in portrayal, e.g. "
@@ -89,7 +93,7 @@ def characters(chars: pd.DataFrame, port: pd.DataFrame, dates: pd.Series, source
         pc.insert(pc.columns.get_loc("full_name") + 1, "name_source", pc.pop("name_source"))
     pc["char_id"] = pc["char_id"].astype(chars["char_id"].dtype)
     out = chars.merge(pc, on=["doc_id", "char_id"], how="left", validate="one_to_one")
-    if len(out) != len(chars) or out["portrayal_n"].notna().sum() != len(pc):
+    if len(out) != len(chars) or out["portrayal_n"].notna().sum() != len(pc) or out["portrayal_n"].sum() != len(port):
         raise ValueError("portrayal rows do not all match a character")
     out["portrayal_n"] = out["portrayal_n"].fillna(0).astype("int32")
     out["portrayal"] = [x if isinstance(x, list) else [] for x in out["portrayal"]]
