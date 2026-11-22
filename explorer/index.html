@@ -150,7 +150,7 @@ td { font-family: var(--f-data); }
       <div class="field"><span>Period</span>
         <div class="row" style="gap:6px"><select id="y0" aria-label="From year"></select><span class="sub">to</span><select id="y1" aria-label="To year"></select><button type="button" class="linkbtn" id="yreset" hidden>Full period</button></div></div>
       <div class="field" style="flex:1 1 220px"><span>Newspapers</span>
-        <details class="outlets" id="outlets"><summary id="osum">All 32 newspapers</summary><div class="olist" id="olist"></div></details></div>
+        <details class="outlets" id="outlets"><summary id="osum">All newspapers</summary><div class="olist" id="olist"></div></details></div>
     </div>
     <div class="hint" id="reshint" hidden></div>
   </div>
@@ -204,7 +204,7 @@ td { font-family: var(--f-data); }
     <p>A person is named by the full name in their coreference chain. A chain that only says « Mélenchon » or « M. Mélenchon » takes the article's own
       « Jean-Luc Mélenchon » when there is exactly one; otherwise the person that family name stands for that year, when one person holds at least 90% of the
       articles naming someone « … Mélenchon ». Le Pen, place names, and family names that are also first names (Philippe, Bertrand) are never resolved that way.
-      A name groups every spelling that differs only by case, accents or hyphens, and homonyms are merged. Only names found in at least MIN_DOCS articles are listed.
+      A name groups every spelling that differs only by case, accents or hyphens, and homonyms are merged. Only names found in at least 30 articles are listed, with monthly detail for names in 1,000 articles or more.
       The mix of newspapers changes over the years (only Le Monde before 2008). Pick a fixed set of newspapers to compare years on equal terms.</p>
     <p class="status" id="status">Loading the name index…</p>
   </section>
@@ -590,7 +590,7 @@ async function render() {
   if (data.length && !monthlyOk) {
     hint.hidden = false;
     hint.textContent = S.oset ? "Quarterly and monthly steps cover all newspapers together; clear the newspaper filter to use them."
-      : "Quarterly and monthly steps need every selected person to appear in at least 300 articles.";
+      : "Quarterly and monthly steps need every selected person to appear in at least 1,000 articles.";
   } else hint.hidden = true;
   $("sum-sub").textContent = data.length ? `${S.y0}–${S.y1}${S.oset ? `, ${S.oset.size} newspapers` : ""}` : "";
   $("time-sub").textContent = data.length ? `${S.y0}–${S.y1} · ${DIMS[S.dim].label}, ${S.res === "year" ? "yearly" : S.res === "quarter" ? "quarterly" : "monthly"} means with 95% intervals${S.oset ? `, ${S.oset.size} newspapers` : ""}. Drag across the chart to zoom, double-click to reset.` : "";
@@ -622,7 +622,7 @@ function search(q) {
 }
 function showSugg() {
   const ul = $("suggest"), q = $("q");
-  if (!sugg.length) { ul.hidden = true; q.setAttribute("aria-expanded", "false"); if (q.value.trim()) { ul.innerHTML = `<li aria-disabled="true"><span class="alt">No name in 20+ articles matches</span></li>`; ul.hidden = false; } return; }
+  if (!sugg.length) { ul.hidden = true; q.setAttribute("aria-expanded", "false"); if (q.value.trim()) { ul.innerHTML = `<li aria-disabled="true"><span class="alt">No name in 30+ articles matches</span></li>`; ul.hidden = false; } return; }
   ul.innerHTML = sugg.map((e, i) => `<li role="option" id="opt${i}" aria-selected="${i === active}" data-k="${esc(e[0])}"><span>${esc(e[1])}${e[4].length ? ` <span class="alt">· ${esc(e[4][0].replace(/ /g, " "))}</span>` : ""}</span><span class="n">${nf.format(e[2])} art.</span></li>`).join("");
   ul.hidden = false; q.setAttribute("aria-expanded", "true");
   if (active >= 0) q.setAttribute("aria-activedescendant", "opt" + active); else q.removeAttribute("aria-activedescendant");
@@ -660,6 +660,7 @@ function outletUI() {
     $("osum").textContent = S.oset ? `${on.length} of ${S.outlets.length} newspapers` : `All ${S.outlets.length} newspapers`;
     render();
   };
+  $("osum").textContent = `All ${S.outlets.length} newspapers`;
   $("olist").addEventListener("change", sync);
   $("olist").addEventListener("click", e => { const b = e.target.closest("button[data-a]"); if (!b) return;
     $("olist").querySelectorAll("input").forEach(x => x.checked = b.dataset.a === "all"); sync(); });
