@@ -9,4 +9,4 @@ params:
   parse_ner: {k: 10}
   qwen: {single_process: true}
   quotes: {compute_type: float16, split: chunks}
-  portrayal: {seeds: [0], exclude_possessive: true}   # pin `revision` to the new model commit before launching
+  portrayal: {seeds: [0], exclude_possessive: true, revision: 678e23cc21ff9026f5a183ef7905ee5a0ac119d3}   # v2
