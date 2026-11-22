@@ -129,7 +129,8 @@ def site(c: pd.DataFrame, names: pd.DataFrame, out: str, min_docs=20, monthly_do
     m = summarise(c[c["key"].isin(big)], ["key", "month"])
     index = [[k, sp[k][0], int(r.n_docs), int(r.n_seg), sp[k][1:]] for k, r in keep.iterrows()]
     os.makedirs(os.path.join(out, "data"), exist_ok=True)
-    json.dump({"n_buckets": n_buckets, "dims": dims, "outlets": outlets, "names": index},
+    years = [int(c["month"].min()[:4]), int(c["month"].max()[:4])]
+    json.dump({"n_buckets": n_buckets, "dims": dims, "outlets": outlets, "years": years, "names": index},
               open(os.path.join(out, "index.json"), "w"), ensure_ascii=False, separators=(",", ":"))
     cols = lambda t, first: {col: t[col].tolist() for col in first + ["n_docs", "W", "WW"] + [x for k in dims for x in (k, f"se_{k}")]}
     buckets: dict[int, dict] = {}

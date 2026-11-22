@@ -114,7 +114,7 @@ td { font-family: var(--f-data); }
 
 <div class="wrap">
   <header>
-    <div class="eyebrow">French online press · politics section · 2008–2026</div>
+    <div class="eyebrow">Le Monde 1944–2026 · politics sections of 32 French news sites 2008–2026</div>
     <h1>Political Portraits</h1>
     <p class="lede">How the press portrays a person, passage by passage: judged well or badly, framed as radical or moderate, rising or falling in the race.
       Type a name, compare up to three, split by year or newspaper, and rank the most mentioned people.</p>
@@ -194,22 +194,25 @@ td { font-family: var(--f-data); }
 
   <section class="notes" aria-labelledby="t-notes">
     <h2 id="t-notes">How the scores are made</h2>
-    <p>1.45 million articles from the politics sections of 32 French news sites (Le Monde is not included). People are found by named-entity recognition and
-      Qwen coreference. Each passage centred on a mention is scored by <code>portrayal-camembert-large</code> v2 (seed 0), trained on codebook v4.</p>
+    <p>Le Monde, 1944 to November 2026 (3.2 million articles, every section), and the politics sections of 32 French news sites, 2008 to November 2026
+      (1.48 million articles; the section comes from <code>n-gramsci/rubriques-presse</code>, and from the same classifier after June 2026). People are found by
+      named-entity recognition and Qwen coreference. Each passage centred on a mention is scored by <code>portrayal-camembert-large</code> v2 (seed 0), trained on codebook v4.</p>
     <p><b>Valence</b> is P(positive) − P(negative) judgement of the person. <b>Radical framing</b> is P(framed as radical or extreme) − P(framed as moderate).
       <b>Momentum</b> is P(rising in the race) − P(declining). All three run from −1 to +1. Most passages carry no judgement, so averages sit close to 0.</p>
     <p>A point averages every scored passage, weighted by the probability that the passage says something about the person. Long portraits weigh more than passing mentions.
       Shaded bands and whiskers are 95% intervals, with articles as the resampling unit.</p>
-    <p>A name groups every spelling that differs only by case, accents or hyphens. Homonyms are merged, and so is an honorific form such as « Mme Le Pen » with whoever it designates.
-      Only names found in at least 20 articles are listed, with monthly detail for names in 300 articles or more.
-      The mix of newspapers changes over the years. Pick a fixed set of newspapers to compare years on equal terms.</p>
+    <p>A person is named by the full name in their coreference chain. A chain that only says « Mélenchon » or « M. Mélenchon » takes the article's own
+      « Jean-Luc Mélenchon » when there is exactly one; otherwise the person that family name stands for that year, when one person holds at least 90% of the
+      articles naming someone « … Mélenchon ». Le Pen, place names, and family names that are also first names (Philippe, Bertrand) are never resolved that way.
+      A name groups every spelling that differs only by case, accents or hyphens, and homonyms are merged. Only names found in at least MIN_DOCS articles are listed.
+      The mix of newspapers changes over the years (only Le Monde before 2008). Pick a fixed set of newspapers to compare years on equal terms.</p>
     <p class="status" id="status">Loading the name index…</p>
   </section>
 </div>
 
 <script>
 (() => {
-const OUTLET_NAMES = {"20minutes":"20 Minutes","atlantico":"Atlantico","bfmtv":"BFMTV","blast":"Blast","challenges":"Challenges","cnews":"CNews",
+const OUTLET_NAMES = {"lemonde":"Le Monde","20minutes":"20 Minutes","atlantico":"Atlantico","bfmtv":"BFMTV","blast":"Blast","challenges":"Challenges","cnews":"CNews",
   "francesoir":"FranceSoir","l_opinion":"L'Opinion","la_croix":"La Croix","la_depeche":"La Dépêche","laprovence":"La Provence","latribune":"La Tribune",
   "le_capital":"Capital","le_courrier_de_l_ouest":"Le Courrier de l'Ouest","le_figaro":"Le Figaro","le_journal_du_dimanche":"Le JDD",
   "le_maine_libre":"Le Maine Libre","le_nouvel_observateur":"L'Obs","le_telegramme":"Le Télégramme","leparisien":"Le Parisien","les_echos":"Les Échos",
@@ -225,7 +228,7 @@ const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).
 const fmt = x => (x >= 0 ? "+" : "−") + Math.abs(x).toFixed(3);
 const nf = new Intl.NumberFormat("en-GB");
 
-const S = {index: null, byKey: new Map(), outlets: [], sel: [], dim: "valence", res: "year", minn: 10, oset: null, y0: 2008, y1: 2026, cache: new Map()};
+const S = {index: null, byKey: new Map(), outlets: [], sel: [], dim: "valence", res: "year", minn: 10, oset: null, y0: 1944, y1: 2026, Y0: 1944, Y1: 2026, cache: new Map()};
 
 const key = s => s.normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 const CRC = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
@@ -302,8 +305,8 @@ function drawTime(data) {
   }
   svg.append(el("text", {class: "pole", x: m.l, y: 12}, `↑ ${DIMS[S.dim].pos}`));
   svg.append(el("text", {class: "pole", x: m.l, y: H - 4}, `↓ ${DIMS[S.dim].neg}`));
-  const ystep = (t1 - t0) > 12 ? (narrow ? 4 : 2) : 1;
-  for (let y = t0; y <= t1; y++) if ((y - t0) % ystep === 0 && X(y) < W - m.r + 1) {
+  const span = t1 - t0, ystep = span > 60 ? (narrow ? 20 : 10) : span > 30 ? (narrow ? 10 : 5) : span > 12 ? (narrow ? 4 : 2) : 1;
+  for (let y = t0; y <= t1; y++) if ((ystep > 2 ? y % ystep === 0 : (y - t0) % ystep === 0) && X(y) < W - m.r + 1) {
     svg.append(el("line", {x1: X(y), x2: X(y), y1: H - m.b, y2: H - m.b + 4, stroke: zero}));
     if (y < t1 || (t1 - t0) <= 3) svg.append(el("text", {x: X(y) + (narrow ? 0 : 2), y: H - m.b + 16, "text-anchor": narrow ? "middle" : "start"}, y));
   }
@@ -372,9 +375,9 @@ function attachBrush(svg, hit, m, W, H, t0, t1) {
   hit.addEventListener("pointerup", ev => { if (drag == null) return; const a = Math.min(drag, toSx(ev)), b = Math.max(drag, toSx(ev)); drag = null;
     brush.setAttribute("visibility", "hidden");
     if (b - a < 8) return;
-    const ya = Math.max(2008, Math.floor(toT(a))), yb = Math.min(2026, Math.floor(toT(b) - 1e-6));
+    const ya = Math.max(S.Y0, Math.floor(toT(a))), yb = Math.min(S.Y1, Math.floor(toT(b) - 1e-6));
     setPeriod(ya, Math.max(ya, yb)); });
-  hit.addEventListener("dblclick", () => setPeriod(2008, 2026));
+  hit.addEventListener("dblclick", () => setPeriod(S.Y0, S.Y1));
   return () => drag != null;
 }
 // article counts per period (all outlets in the filter, no minimum)
@@ -405,8 +408,8 @@ function drawMentions(data) {
     svg.append(el("line", {x1: m.l, x2: W - m.r, y1: Y(v), y2: Y(v), stroke: v === 0 ? zero : grid, "stroke-width": v === 0 ? 1.25 : 1}));
     svg.append(el("text", {x: m.l - 8, y: Y(v) + 4, "text-anchor": "end"}, cf.format(v)));
   }
-  const ystep = (t1 - t0) > 12 ? (narrow ? 4 : 2) : 1;
-  for (let y = t0; y <= t1; y++) if ((y - t0) % ystep === 0 && X(y) < W - m.r + 1) {
+  const span = t1 - t0, ystep = span > 60 ? (narrow ? 20 : 10) : span > 30 ? (narrow ? 10 : 5) : span > 12 ? (narrow ? 4 : 2) : 1;
+  for (let y = t0; y <= t1; y++) if ((ystep > 2 ? y % ystep === 0 : (y - t0) % ystep === 0) && X(y) < W - m.r + 1) {
     svg.append(el("line", {x1: X(y), x2: X(y), y1: H - m.b, y2: H - m.b + 4, stroke: zero}));
     if (y < t1 || (t1 - t0) <= 3) svg.append(el("text", {x: X(y) + (narrow ? 0 : 2), y: H - m.b + 16, "text-anchor": narrow ? "middle" : "start"}, y));
   }
@@ -642,10 +645,10 @@ $("minn").addEventListener("change", e => { S.minn = +e.target.value; render(); 
 function setPeriod(a, b) {
   if (a > b) [a, b] = [b, a];
   S.y0 = a; S.y1 = b; $("y0").value = a; $("y1").value = b;
-  $("yreset").hidden = a === 2008 && b === 2026; render();
+  $("yreset").hidden = a === S.Y0 && b === S.Y1; render();
 }
 for (const id of ["y0", "y1"]) $(id).addEventListener("change", () => setPeriod(+$("y0").value, +$("y1").value));
-$("yreset").addEventListener("click", () => setPeriod(2008, 2026));
+$("yreset").addEventListener("click", () => setPeriod(S.Y0, S.Y1));
 
 function outletUI() {
   const order = S.outlets.map((o, i) => i).sort((a, b) => (OUTLET_NAMES[S.outlets[a]] || "").localeCompare(OUTLET_NAMES[S.outlets[b]] || "", "fr"));
@@ -668,7 +671,8 @@ new MutationObserver(render).observe(document.documentElement, {attributes: true
 
 fetch("index.json").then(r => { if (!r.ok) throw new Error("index.json " + r.status); return r.json(); }).then(ix => {
   S.index = ix; S.outlets = ix.outlets; ix.names.forEach((e, i) => S.byKey.set(e[0], i));
-  for (let y = 2008; y <= 2026; y++) for (const id of ["y0", "y1"]) $(id).append(new Option(y, y));
+  if (ix.years) { [S.Y0, S.Y1] = ix.years; S.y0 = S.Y0; S.y1 = S.Y1; }
+  for (let y = S.Y0; y <= S.Y1; y++) for (const id of ["y0", "y1"]) $(id).append(new Option(y, y));
   $("y0").value = S.y0; $("y1").value = S.y1;
   outletUI();
   S.sel = DEFAULT.filter(k => S.byKey.has(k));
