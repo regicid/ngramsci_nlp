@@ -16,11 +16,19 @@ from ..stage import Output, Stage, register
 from ..textio import read_text
 
 STOP = set("le la les l un une des du de au aux ce cet cette son sa ses".split())
+POSS = set("mon ma mes ton ta tes son sa ses notre nos votre vos leur leurs".split())
+
+
+def possessive(ents):
+    """Possessive determiners of a chain ('son' in 'son discours'): with `exclude_possessive`, they neither make a
+    segment nor get marked in one (the pronoun 'leur' in 'il leur parle' is not a determiner and stays)."""
+    return ents["POS_tag"].eq("DET") & ents["text"].str.lower().str.strip().isin(POSS)
 
 
 def load(ctx):
     from ..portrayal import HUB, Scorer
-    return Scorer.from_hub(ctx.p("portrayal", "model", HUB), seeds=ctx.p("portrayal", "seeds", [0, 1]))
+    return Scorer.from_hub(ctx.p("portrayal", "model", HUB), seeds=ctx.p("portrayal", "seeds", [0, 1]),
+                           revision=ctx.p("portrayal", "revision"))
 
 
 def full_name(surfaces):
@@ -77,7 +85,9 @@ def load_targets(ctx):
 def run(k, inp, out, state, ctx):
     docs = read_text(inp["text"]).set_index("doc_id")
     m = pd.read_parquet(inp["mentions"], columns=["doc_id", "start_token", "end_token", "onset", "offset"])
-    e = pd.read_parquet(inp["entities"], columns=["doc_id", "start_token", "end_token", "cat", "prop", "COREF"])
+    e = pd.read_parquet(inp["entities"], columns=["doc_id", "start_token", "end_token", "cat", "prop", "COREF", "POS_tag", "text"])
+    if ctx.p("portrayal", "exclude_possessive", False):
+        e = e[~possessive(e)]
     e["COREF"] = pd.to_numeric(e["COREF"], errors="coerce")
     for c in ("start_token", "end_token"):
         e[c] = pd.to_numeric(e[c], errors="coerce"); m[c] = m[c].astype(int)
@@ -102,7 +112,7 @@ def run(k, inp, out, state, ctx):
         for j, c in enumerate(("neg", "zero", "pos")):
             df[f"p_{h}_{c}"] = [p[h][j] for p in P]
     df.to_parquet(out["portrayal"], index=False)
-    return {"docs": int(df["doc_id"].nunique()) if len(df) else 0, "people": int(df.groupby(["doc_id", "chain"]).ngroups) if len(df) else 0,
+    return {"model": state.revision, "docs": int(df["doc_id"].nunique()) if len(df) else 0, "people": int(df.groupby(["doc_id", "chain"]).ngroups) if len(df) else 0,
             "segments": len(df)}
 
 

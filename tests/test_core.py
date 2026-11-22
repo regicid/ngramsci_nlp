@@ -56,8 +56,31 @@ def test_disk_claims(tmp_path):
     assert not b.claim("st", 3, ttl_h=1)          # live claim
     os.utime(a._lock("st", 3), (time.time() - 7200, time.time() - 7200))
     assert b.claim("st", 3, ttl_h=1)              # stale -> taken over
-    a.release("st", 3)
+    a.release("st", 3)                            # not ours any more: kept
+    assert a.claims("st")[3][1] == "other"
+    b.release("st", 3)
     assert 3 not in a.claims("st")
+
+
+def test_partial_work_of_a_running_worker_is_not_taken(tmp_path):
+    """Two workers of one site: a non-empty scratch dir under a live claim belongs to the worker running it."""
+    corpus = Corpus(name="toy", n_shards=2)
+    board, priv = DiskStore(str(tmp_path / "board")), DiskStore(str(tmp_path / "priv"))
+    for k in range(2):
+        _text(str(tmp_path / "priv"), k)
+    site = Site(name="A", ssh=None, code=".", work=str(tmp_path / "w"))
+    a = Worker(corpus, site, ["t_upper"], board=board, private=priv, poll=0)
+    b = Worker(corpus, site, ["t_upper"], board=board, private=priv, poll=0)
+    board.who = "a"
+    st, k, _ = a.pick()
+    assert k == 0
+    os.makedirs(os.path.join(a.scratch(st, 0), "out"))       # a is running shard 0
+    board.who = "b"
+    assert b.pick()[1] == 1                                   # b leaves it alone
+    board.release(st.name, 1)
+    board.who = "a"; board.release(st.name, 0)                # a stopped at its deadline: claim released
+    board.who = "b"
+    assert b.pick()[1] == 0                                   # now b resumes the partial work first
 
 
 def test_worker_two_sites(tmp_path):

@@ -125,7 +125,14 @@ class DiskStore(Store):
             pass
 
     def release(self, stage, k):
-        shutil.rmtree(self._lock(stage, k), ignore_errors=True)
+        """Remove the lock if it is ours (a stale lock taken over by another worker is theirs now)."""
+        lock = self._lock(stage, k)
+        try:
+            if open(os.path.join(lock, "who")).read().strip() != self.who:
+                return
+        except OSError:
+            pass                                                   # no who file: half-made lock, remove it
+        shutil.rmtree(lock, ignore_errors=True)
 
 
 class HubStore(Store):

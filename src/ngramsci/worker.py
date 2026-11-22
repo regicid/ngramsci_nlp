@@ -78,11 +78,12 @@ class Worker:
             ttl = self.c.ttl_hours.get(st.name, st.ttl_hours)
             cl = self.claimer(st)
             claims = cl.claims(st.name)
-            for k in todo:
+            # Partial work left on this site goes first, but it is claimed like any other shard: a non-empty scratch
+            # dir may belong to a worker still running it (two workers on one shard -> the first to finish deletes
+            # the dir under the other). A worker stopping at its deadline releases its claim, so resuming is immediate.
+            for k in sorted(todo, key=lambda k: not self.mine(st, k)):
                 if k not in ready:
                     continue
-                if self.mine(st, k):
-                    return st, k, waiting
                 c = claims.get(k)
                 if c and time.time() - c[0] < ttl * 3600:
                     continue
@@ -145,7 +146,8 @@ class Worker:
             try:
                 self.run_one(st, k); self.n_done += 1; fails = 0
             except S.Deadline:
-                _log(f"{st.name} shard {k}: stopped at the deadline, partial work kept"); break
+                _log(f"{st.name} shard {k}: stopped at the deadline, partial work kept")
+                self.claimer(st).release(st.name, k); break
             except Exception:
                 traceback.print_exc(); fails += 1
                 self.failed.add((st.name, k)); self.claimer(st).release(st.name, k)

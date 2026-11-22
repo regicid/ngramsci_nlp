@@ -50,19 +50,25 @@ class Scorer:
         from transformers import AutoTokenizer
         self.dev = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.tok = AutoTokenizer.from_pretrained(base)
-        self.models = []
+        self.models, self.revision = [], None
         for sd in state_dicts:
             m = net(base); m.load_state_dict(sd); m = m.to(self.dev).eval()
             self.models.append(m.half() if self.dev == "cuda" else m)
 
     @classmethod
-    def from_hub(cls, repo=HUB, seeds=None, **kw):
-        from huggingface_hub import hf_hub_download
+    def from_hub(cls, repo=HUB, seeds=None, revision=None, **kw):
+        """revision: a commit, tag or branch of the model repo (default: main, resolved to its commit once, so every
+        file comes from the same version and the commit can be recorded)."""
+        from huggingface_hub import HfApi, hf_hub_download
         from safetensors.torch import load_file
-        cfg = json.load(open(hf_hub_download(repo, "config.json")))
+        rev = HfApi().model_info(repo, revision=revision).sha
+        get = lambda f: hf_hub_download(repo, f, revision=rev)
+        cfg = json.load(open(get("config.json")))
         seeds = cfg["seeds"] if seeds is None else seeds
-        sds = [{k: v.float() for k, v in load_file(hf_hub_download(repo, f"seed{s}/model.safetensors")).items()} for s in seeds]
-        return cls(sds, base=cfg.get("base_model", BASE), **kw)
+        sds = [{k: v.float() for k, v in load_file(get(f"seed{s}/model.safetensors")).items()} for s in seeds]
+        sc = cls(sds, base=cfg.get("base_model", BASE), **kw)
+        sc.revision = f"{repo}@{rev}"
+        return sc
 
     def score(self, rows, batch=64):
         import torch
