@@ -62,7 +62,7 @@ def bare_surname(surfaces):
         if w and w[0] in TITLES:
             w = w[1:]
         t = " ".join(w)
-        if t and t[0].isupper() and SURNAME_RE.match(t) and t.split()[0].lower() not in ("son", "sa", "ses", "ce", "cette"):
+        if t and t.split()[-1][0].isupper() and SURNAME_RE.match(t) and t.split()[0].lower() not in ("son", "sa", "ses", "ce", "cette"):
             c[t] += 1
     return c.most_common(1)[0][0] if c else None
 
@@ -100,10 +100,18 @@ def people(text, ents, min_mentions=1, surnames=None, year=None, only_surname=Fa
     return found if only_surname else named + found
 
 
+# words found before a family name that are not first names (« Général de Gaulle », « Vive de Gaulle », « Lycée Jaurès »)
+NOT_FIRST = set("general president presidente vive marechal amiral colonel commandant capitaine lieutenant ministre senateur "
+                "depute maire professeur pere abbe cardinal saint sainte mines lycee college rue place avenue boulevard quai "
+                "aeroport fondation institut centre hopital ecole universite pont stade gare".split())
+
+
 class Surnames:
     """Family name -> the one person it stands for in a given year: the first name holding >= `share` of the articles
     naming someone « <first> <family name> » in year-1..year+1, with >= `min_n` such articles. `exclude`: family names
-    never resolved (Le Pen: Marine, Jean-Marie, Marion). Built from counts {(family key, year, full name): n articles}."""
+    never resolved (Le Pen: Marine, Jean-Marie, Marion). A family name that is also a first name (used as one in >= 10% as
+    many articles: Philippe, Bertrand, Laurent) is never resolved either: a bare « Philippe » is usually someone's first
+    name. Built from counts {(family key, year, full name): n articles}."""
     def __init__(self, table: dict):
         self.t = table                                   # {family key: {year: full name}}
 
@@ -115,6 +123,10 @@ class Surnames:
         """counts: columns key (family key), year, full_name, n."""
         from ..explorer import name_key
         ex = {name_key(x) for x in exclude}
+        counts = counts[~counts["full_name"].map(lambda n: name_key(n.split()[0]) in NOT_FIRST)]
+        first = counts.assign(f=counts["full_name"].map(lambda n: name_key(n.split()[0]))).groupby("f")["n"].sum()
+        fam = counts.groupby("key")["n"].sum()
+        ex |= {k for k, v in fam.items() if first.get(k, 0) >= 0.1 * v}
         c = counts[~counts["key"].isin(ex)]
         c = c.assign(nk=c["full_name"].map(name_key))
         disp = c.groupby("nk")["full_name"].agg(lambda s: s.value_counts().index[0])

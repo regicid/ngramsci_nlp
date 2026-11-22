@@ -111,10 +111,15 @@ def test_portrayal_family_names():
     from ngramsci.stages.portrayal import Surnames, bare_surname, people
     counts = pd.DataFrame([("melenchon", 2017, "Jean-Luc Mélenchon", 95), ("melenchon", 2017, "Sophie Mélenchon", 2),
                            ("martin", 2017, "Paul Martin", 30), ("martin", 2017, "Jean Martin", 25),
-                           ("le pen", 2017, "Marine Le Pen", 500)], columns=["key", "year", "full_name", "n"])
+                           ("le pen", 2017, "Marine Le Pen", 500), ("philippe", 2017, "Edouard Philippe", 300),
+                           ("martinez", 2017, "Philippe Martinez", 60),
+                           ("de gaulle", 1960, "Charles de Gaulle", 90), ("de gaulle", 1960, "Général de Gaulle", 8),
+                           ("de gaulle", 1960, "Pierre de Gaulle", 3)], columns=["key", "year", "full_name", "n"])
     sn = Surnames.build(counts)
     assert sn.get("melenchon", 2017) == sn.get("melenchon", 2018) == "Jean-Luc Mélenchon"       # ±1 year window
     assert sn.get("melenchon", 2020) is None and sn.get("martin", 2017) is None and sn.get("le pen", 2017) is None
+    assert sn.get("philippe", 2017) is None and sn.get("martinez", 2017) == "Philippe Martinez"   # also a first name
+    assert bare_surname(["de Gaulle", "le général"]) == "de Gaulle" and sn.get("de gaulle", 1960) == "Charles de Gaulle"
     assert bare_surname(["M. Mélenchon", "Mélenchon", "le leader insoumis"]) == "Mélenchon"
     text = "Mélenchon à Lyon///M. Mélenchon parle. Il rencontre Paul Martin. Martin répond."
     on = lambda s: text.index(s)
