@@ -67,11 +67,13 @@ def bare_surname(surfaces):
     return c.most_common(1)[0][0] if c else None
 
 
-def people(text, ents, min_mentions=1, surnames=None, year=None, only_surname=False):
+def people(text, ents, min_mentions=1, surnames=None, year=None, only_surname=False, with_source=False):
     """[(chain id, full name, [(onset, offset)])] for the PER chains of one article.
     A chain with no « First Last » mention but a family name (« Mélenchon », « M. Mélenchon ») takes the article's one
     « <first> Mélenchon » if there is exactly one, else the person `surnames` (Surnames) gives for that name and year.
-    only_surname: return only the chains named that way (to score them on top of an earlier run)."""
+    only_surname: return only the chains named that way (to score them on top of an earlier run).
+    with_source: 4-tuples, + where the name comes from: "chain" (the chain's own « First Last »), "article" (« Mme X » or a
+    bare « X » resolved by the article's one « First X »), "family_name" (the person `surnames` gives for that year)."""
     named, bare = [], []
     per = ents[(ents["cat"] == "PER") & ents["COREF"].notna()]
     for ch, g in per.groupby("COREF"):
@@ -88,16 +90,19 @@ def people(text, ents, min_mentions=1, surnames=None, year=None, only_surname=Fa
             sn = bare_surname(surf)
             if sn:
                 bare.append((int(ch), sn, spans))
-    named = resolve_honorifics(named)
+    before = {ch: n for ch, n, _ in named}
+    named = [(ch, n, sp, "chain" if before[ch] == n else "article") for ch, n, sp in resolve_honorifics(named)]
     from ..explorer import name_key
     found = []
     for ch, sn, spans in bare:
         k = name_key(sn)
-        here = {n for _, n, _ in named if n.split()[0] not in HONORIFIC and name_key(surname_of(n)) == k}
-        name = here.pop() if len(here) == 1 else (surnames.get(k, year) if surnames is not None and not here else None)
-        if name:
-            found.append((ch, name, spans))
-    return found if only_surname else named + found
+        here = {n for _, n, _, _ in named if n.split()[0] not in HONORIFIC and name_key(surname_of(n)) == k}
+        if len(here) == 1:
+            found.append((ch, here.pop(), spans, "article"))
+        elif not here and surnames is not None and (name := surnames.get(k, year)):
+            found.append((ch, name, spans, "family_name"))
+    out = found if only_surname else named + found
+    return out if with_source else [x[:3] for x in out]
 
 
 # words found before a family name that are not first names (« Général de Gaulle », « Vive de Gaulle », « Lycée Jaurès »)

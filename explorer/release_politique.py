@@ -1,13 +1,16 @@
 """Build the propp-press release files of politique (characters + portrayal, entities), one task of an array.
 usage (cca htc array): python explorer/release_politique.py I N   -> <W>/release/data/{characters,entities}_qwen4b/politique/
-Reads the board (characters/, entities/, portrayal/, and portrayal_surnames/ with SURNAMES=1 once that pass is complete
-on every shard) and dates from the private text."""
+Reads the board (characters/, entities/, mentions/, portrayal/ + portrayal_surnames/ where it exists) and the private
+text (dates, and the text the names are recomputed from for name_source)."""
 import gzip, json, os, sys
 import pandas as pd
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from huggingface_hub import hf_hub_download
 from huggingface_hub.utils import EntryNotFoundError
 from ngramsci import release as Rl
+from ngramsci.stages.portrayal import Surnames, load_inputs
+SN = Surnames.from_json(os.path.join(os.path.dirname(__file__), "..", "data", "surnames.json"))
+N_SHARDS = 311
 R = "regicid/qcoref-politique-work"; W = os.environ.get("NGRAMSCI_WORK", "/sps/humanum/home/bdecourson/ngramsci_work")
 TXT, OUT, CACHE = f"{W}/private/politique/text", f"{W}/release", f"{W}/cache/release"
 
@@ -18,13 +21,13 @@ def get(p):
         return None
 
 def one(k):
-    with gzip.open(f"{TXT}/shard_{k:05d}.jsonl.gz", "rt") as f:
-        ds = pd.Series({(d := json.loads(l))["doc_id"]: d.get("date") for l in f})
-    c, e = pd.read_parquet(get(f"characters/shard_{k:05d}.parquet")), pd.read_parquet(get(f"entities/shard_{k:05d}.parquet"))
-    srcs = [f"portrayal/shard_{k:05d}.parquet"] + ([f"portrayal_surnames/shard_{k:05d}.parquet"] if os.environ.get("SURNAMES") == "1" else [])
-    ps = [pd.read_parquet(get(s)) for s in srcs]
+    txt, fe_in = f"{TXT}/shard_{k:05d}.jsonl.gz", get(f"entities/shard_{k:05d}.parquet")
+    docs, ents = load_inputs(txt, get(f"mentions/shard_{k:05d}.ner.parquet"), fe_in, exclude_possessive=True)
+    ds = docs["date"]
+    c, e = pd.read_parquet(get(f"characters/shard_{k:05d}.parquet")), pd.read_parquet(fe_in)
+    ps = [pd.read_parquet(f) for f in (get(f"portrayal/shard_{k:05d}.parquet"), get(f"portrayal_surnames/shard_{k:05d}.parquet")) if f]
     p = pd.concat(ps, ignore_index=True)
-    co, eo = Rl.characters(c, p, ds), Rl.entities(e, ds)
+    co, eo = Rl.characters(c, p, ds, sources=Rl.name_sources(docs, ents, SN)), Rl.entities(e, ds)
     fc, fe = f"{OUT}/data/characters_qwen4b/politique/part-{k:05d}.parquet", f"{OUT}/data/entities_qwen4b/politique/part-{k:05d}.parquet"
     co.to_parquet(fc, index=False); eo.to_parquet(fe, index=False)
     rc, re_ = pd.read_parquet(fc, columns=["portrayal_n", "date"]), pd.read_parquet(fe, columns=["date"])
@@ -36,6 +39,6 @@ if __name__ == "__main__":
     for d in ("characters_qwen4b", "entities_qwen4b"):
         os.makedirs(f"{OUT}/data/{d}/politique", exist_ok=True)
     res = []
-    for k in range(i, 305, n):
+    for k in range(i, N_SHARDS, n):
         res.append(one(k)); print(res[-1], flush=True)
     json.dump(res, open(f"{OUT}/slice_{i:03d}.json", "w")); print("DONE", flush=True)

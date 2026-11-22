@@ -130,3 +130,5 @@ def test_portrayal_family_names():
     assert got == {(0, "Jean-Luc Mélenchon"), (1, "Paul Martin"), (2, "Paul Martin")}          # 2: the article's Martin
     assert {n for _, n, _ in people(text, ents)} == {"Paul Martin"}                             # old behaviour without table
     assert {c for c, _, _ in people(text, ents, surnames=sn, year=2017, only_surname=True)} == {0, 2}
+    assert {(c, src) for c, _, _, src in people(text, ents, surnames=sn, year=2017, with_source=True)} == \
+        {(0, "family_name"), (1, "chain"), (2, "article")}
