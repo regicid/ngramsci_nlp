@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from ngramsci import explorer as E
 W = "/sps/humanum/home/bdecourson/ngramsci_work"; OUT = f"{W}/explorer"
 COLS = ["doc_id", "date", "newspaper", "full_name", "portrayal_n", "portrayal_pertinent",
-        "portrayal_valence", "portrayal_extremisme", "portrayal_dynamique"]
+        "portrayal_valence", "portrayal_extremisme", "portrayal_dynamique", "portrayal_journaliste"]
 
 def one(f):
     return E.cells_from_characters(pd.read_parquet(f, columns=COLS))
