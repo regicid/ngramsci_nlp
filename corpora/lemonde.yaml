@@ -1,0 +1,10 @@
+# Le Monde 1944 -> Nov 2026 (3.2 M articles), the propp-qwen run of 2026-11 on cca: each published group (shard, reuse|ner)
+# is one ngramsci shard, symlinked by explorer/lemonde_setup.py (mapping.tsv in the board dir). Disk-only corpus: the
+# board is <cca work>/board/lemonde, so it runs on cca only (text, mentions and entities are there).
+name: lemonde
+n_shards: 656
+layout:
+  text: text/shard_{k:05d}.parquet
+params:
+  portrayal: {seeds: [0], exclude_possessive: true, revision: 678e23cc21ff9026f5a183ef7905ee5a0ac119d3,   # v2, as politique
+              surnames_file: data/surnames.json}
