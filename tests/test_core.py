@@ -278,3 +278,19 @@ def test_explorer_cells_and_merge():
     y = E.summarise(c.assign(year=c["month"].str[:4]), ["key", "year"])
     Ra, sea = E.merged({k: y[k].to_numpy() for k in y.columns}, "valence")
     assert abs(Ra - R0) < 1e-3 and abs(sea / se0 - 1) < 0.1
+
+
+def test_release_characters_with_portrayal():
+    import pandas as pd
+    from ngramsci import release as Rl
+    chars = pd.DataFrame({"newspaper": "politique", "doc_id": ["le_figaro_1", "le_figaro_1", "mediapart_2"], "char_id": pd.array([0, 1, 0], dtype="int32")})
+    base = {f"p_{k}_{s}": 0.1 for k in Rl.DIMS for s in ("neg", "zero", "pos")}
+    port = pd.DataFrame([{"doc_id": "le_figaro_1", "chain": 1, "full_name": "Marine Le Pen", "mention": m, "is_title": 0, "in_quote": 0,
+                          "kind": "name", "p_pertinent": w, "p_journaliste": 0.5, **base, "p_valence_pos": v, "p_valence_neg": 0.0}
+                         for m, w, v in [(1, 0.5, 0.0), (0, 1.0, 0.6)]])
+    out = Rl.characters(chars, port, pd.Series({"le_figaro_1": "2017-04-01", "mediapart_2": "2020-01-02"}))
+    assert list(out["newspaper"]) == ["le_figaro", "le_figaro", "mediapart"] and list(out["date"]) == ["2017-04-01", "2017-04-01", "2020-01-02"]
+    r = out.iloc[1]
+    assert r.full_name == "Marine Le Pen" and r.portrayal_n == 2 and abs(r.portrayal_valence - 0.4) < 1e-6   # (1*.6 + .5*0)/1.5
+    assert [x["valence_pos"] for x in r.portrayal] == [0.6, 0.0]                                            # text order
+    assert out.iloc[0].portrayal_n == 0 and out.iloc[0].portrayal == [] and pd.isna(out.iloc[0].full_name)
