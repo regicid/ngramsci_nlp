@@ -103,6 +103,12 @@ td { font-family: var(--f-data); }
 .notes p { margin: 0; }
 .notes code { font: 13px var(--f-data); }
 .status { font: 13px var(--f-data); color: var(--muted); }
+.rk-fig { overflow-x: auto; }
+.rk-fig svg { min-width: 760px; }
+.chart .rk { font-size: 10.5px; fill: var(--muted); }
+.chart .nm { font-family: var(--f-body); font-size: 13px; fill: var(--fg); }
+.chart .nm.on { font-weight: 700; }
+.chart .ttl { font-family: var(--f-display); font-size: 14px; font-weight: 600; fill: var(--fg); }
 @media (prefers-reduced-motion: no-preference) { .chart path.line { transition: d 0.25s ease; } }
 </style>
 
@@ -111,7 +117,7 @@ td { font-family: var(--f-data); }
     <div class="eyebrow">French online press · politics section · 2008–2026</div>
     <h1>Political Portraits</h1>
     <p class="lede">How the press portrays a person, passage by passage: judged well or badly, framed as radical or moderate, rising or falling in the race.
-      Type a name, compare up to three, and split by year or newspaper.</p>
+      Type a name, compare up to three, split by year or newspaper, and rank the most mentioned people.</p>
   </header>
 
   <div class="controls" role="group" aria-label="Chart controls">
@@ -141,6 +147,8 @@ td { font-family: var(--f-data); }
         <select id="minn" aria-label="Minimum articles per point">
           <option value="5">5 articles</option><option value="10" selected>10 articles</option>
           <option value="30">30 articles</option><option value="100">100 articles</option></select></div>
+      <div class="field"><span>Period</span>
+        <div class="row" style="gap:6px"><select id="y0" aria-label="From year"></select><span class="sub">to</span><select id="y1" aria-label="To year"></select><button type="button" class="linkbtn" id="yreset" hidden>Full period</button></div></div>
       <div class="field" style="flex:1 1 220px"><span>Newspapers</span>
         <details class="outlets" id="outlets"><summary id="osum">All 32 newspapers</summary><div class="olist" id="olist"></div></details></div>
     </div>
@@ -153,18 +161,35 @@ td { font-family: var(--f-data); }
     <details><summary class="sub" style="cursor:pointer">Show the numbers as a table</summary><div class="tablewrap" id="ttable" style="max-height:360px;margin-top:8px"></div></details>
   </section>
 
+  <section class="card" aria-labelledby="t-men">
+    <div class="cardhead"><h2 id="t-men">How often mentioned</h2><div class="sub" id="men-sub"></div></div>
+    <div class="chart" id="men"></div>
+  </section>
   <section class="card" aria-labelledby="t-out">
-    <div class="cardhead"><h2 id="t-out">By newspaper</h2>
-      <div class="row" style="gap:8px">
-        <label class="sub" for="y0">From</label><select id="y0"></select>
-        <label class="sub" for="y1">to</label><select id="y1"></select></div></div>
+    <div class="cardhead"><h2 id="t-out">By newspaper</h2></div>
     <div class="sub" id="out-sub"></div>
     <div class="chart" id="byout"></div>
   </section>
 
   <section class="card" aria-labelledby="t-sum">
-    <h2 id="t-sum">Whole period</h2>
+    <h2 id="t-sum">Selected period</h2><div class="sub" id="sum-sub" style="margin-top:-6px"></div>
     <div class="summary" id="summary"></div>
+  </section>
+
+  <section class="card" aria-labelledby="t-rank">
+    <div class="cardhead"><h2 id="t-rank">Ranking</h2>
+      <div class="row" style="gap:10px 16px">
+        <div class="field"><span>People</span><select id="rk-n" aria-label="Number of people">
+          <option value="20">Top 20</option><option value="40" selected>Top 40</option><option value="60">Top 60</option><option value="100">Top 100</option></select></div>
+        <div class="field"><span>At least</span><select id="rk-min" aria-label="Minimum articles">
+          <option value="50">50 articles</option><option value="200">200 articles</option><option value="500" selected>500 articles</option>
+          <option value="2000">2,000 articles</option><option value="10000">10,000 articles</option></select></div>
+        <div class="field"><span>Sort by</span><div class="seg" id="rk-sort" role="group" aria-label="Sort ranking by">
+          <button type="button" data-k="n" aria-pressed="true">Articles</button><button type="button" data-k="valence" aria-pressed="false">Valence</button>
+          <button type="button" data-k="extremisme" aria-pressed="false">Radical</button><button type="button" data-k="dynamique" aria-pressed="false">Momentum</button></div></div>
+      </div></div>
+    <div class="sub" id="rk-sub">Loading the ranking…</div>
+    <div class="chart rk-fig" id="rank"></div>
   </section>
 
   <section class="notes" aria-labelledby="t-notes">
@@ -223,7 +248,8 @@ function merge(c, idx, dim) {
 }
 const groupBy = (arr, f) => { const m = new Map(); arr.forEach((x, i) => { const k = f(i); if (k == null) return; (m.get(k) || m.set(k, []).get(k)).push(i); }); return m; };
 
-function yearCells(d) { return d.y.year.map((_, i) => i).filter(i => (!S.oset || S.oset.has(d.y.o[i]))); }
+const inPeriod = y => y >= S.y0 && y <= S.y1;
+function yearCells(d) { return d.y.year.map((_, i) => i).filter(i => inPeriod(d.y.year[i]) && (!S.oset || S.oset.has(d.y.o[i]))); }
 
 function series(d) {
   if (S.res === "year" || !d.m) {
@@ -232,6 +258,7 @@ function series(d) {
   }
   const m = d.m, g = groupBy(m.month, i => {
     const [y, mo] = m.month[i].split("-").map(Number);
+    if (!inPeriod(y)) return null;
     return S.res === "month" ? m.month[i] : `${y}-Q${Math.floor((mo - 1) / 3) + 1}`;
   });
   return [...g].map(([lab, idx]) => {
@@ -259,7 +286,7 @@ function drawTime(data) {
   const box = $("time"); box.innerHTML = "";
   const ser = data.map(({k, d}) => ({k, pts: series(d).filter(p => p.n >= S.minn)}));
   const all = ser.flatMap(s => s.pts);
-  if (!all.length) { box.innerHTML = `<div class="empty">No period reaches ${S.minn} articles with these settings.</div>`; $("ttable").innerHTML = ""; return; }
+  if (!all.length) { box.innerHTML = `<div class="empty">No period in ${S.y0}–${S.y1} reaches ${S.minn} articles with these settings.</div>`; $("ttable").innerHTML = ""; return; }
   const W = Math.max(box.clientWidth - 8, 320), narrow = W < 560, H = narrow ? 300 : 360;
   const m = {l: 52, r: narrow ? 16 : 128, t: 26, b: 30};
   let t0 = Math.min(...all.map(p => p.t)), t1 = Math.max(...all.map(p => p.t));
@@ -322,18 +349,99 @@ function drawTime(data) {
     tipAt(box, tip, X(best) * r.width / W, ev.clientY - box.getBoundingClientRect().top,
       `<b>${lab}</b>` + rows.map(({k, p}) => `<div class="r"><i style="background:var(${SERIES[S.sel.indexOf(k)]})"></i><span>${esc(displayName(k))}</span><span class="v">${fmt(p.R)} ± ${(1.96 * p.se).toFixed(3)}</span><span class="n">${nf.format(p.n)} articles</span></div>`).join(""));
   };
+  const brushing = attachBrush(svg, hit, m, W, H, t0, t1);
   hit.addEventListener("pointermove", move); hit.addEventListener("pointerdown", move);
-  hit.addEventListener("pointerleave", () => { tip.hidden = true; cross.setAttribute("visibility", "hidden"); });
+  hit.addEventListener("pointerleave", () => { if (!brushing()) { tip.hidden = true; cross.setAttribute("visibility", "hidden"); } });
   // table
   const labs = [...new Map(all.map(p => [p.t, p.label]))].sort((a, b) => a[0] - b[0]);
   $("ttable").innerHTML = `<table><thead><tr><th>Period</th>${ser.map(s => `<th>${esc(displayName(s.k))}</th><th>±95%</th><th>articles</th>`).join("")}</tr></thead><tbody>` +
     labs.map(([t, l]) => `<tr><td>${l}</td>${ser.map(s => { const p = s.pts.find(p => p.t === t); return p ? `<td>${fmt(p.R)}</td><td>${(1.96 * p.se).toFixed(3)}</td><td>${nf.format(p.n)}</td>` : "<td></td><td></td><td></td>"; }).join("")}</tr>`).join("") + "</tbody></table>";
 }
 
+// drag across a time chart with the mouse to zoom to those years; double-click to reset
+function attachBrush(svg, hit, m, W, H, t0, t1) {
+  const brush = el("rect", {y: m.t, height: H - m.t - m.b, fill: css("--focus"), "fill-opacity": 0.12, stroke: css("--focus"), "stroke-opacity": 0.5, visibility: "hidden", "pointer-events": "none"});
+  svg.insertBefore(brush, hit);
+  let drag = null;
+  const toSx = ev => { const r = svg.getBoundingClientRect(); return Math.min(Math.max((ev.clientX - r.left) * W / r.width, m.l), W - m.r); };
+  const toT = sx => t0 + (sx - m.l) / (W - m.l - m.r) * (t1 - t0);
+  hit.style.cursor = "crosshair";
+  hit.addEventListener("pointerdown", ev => { if (ev.pointerType !== "mouse" || ev.button !== 0) return; drag = toSx(ev); hit.setPointerCapture(ev.pointerId); ev.preventDefault(); });
+  hit.addEventListener("pointermove", ev => { if (drag == null) return; const a = Math.min(drag, toSx(ev)), b = Math.max(drag, toSx(ev));
+    brush.setAttribute("x", a); brush.setAttribute("width", b - a); brush.setAttribute("visibility", "visible"); });
+  hit.addEventListener("pointerup", ev => { if (drag == null) return; const a = Math.min(drag, toSx(ev)), b = Math.max(drag, toSx(ev)); drag = null;
+    brush.setAttribute("visibility", "hidden");
+    if (b - a < 8) return;
+    const ya = Math.max(2008, Math.floor(toT(a))), yb = Math.min(2026, Math.floor(toT(b) - 1e-6));
+    setPeriod(ya, Math.max(ya, yb)); });
+  hit.addEventListener("dblclick", () => setPeriod(2008, 2026));
+  return () => drag != null;
+}
+// article counts per period (all outlets in the filter, no minimum)
+function counts(d) {
+  if (S.res === "year" || !d.m) {
+    const idx = yearCells(d), g = groupBy(idx, j => d.y.year[idx[j]]);
+    return [...g].map(([y, js]) => ({t: y + 0.5, label: String(y), n: js.reduce((a, j) => a + d.y.n_docs[idx[j]], 0)})).sort((a, b) => a.t - b.t);
+  }
+  const m = d.m, g = groupBy(m.month, i => { const [y, mo] = m.month[i].split("-").map(Number); if (!inPeriod(y)) return null;
+    return S.res === "month" ? m.month[i] : `${y}-Q${Math.floor((mo - 1) / 3) + 1}`; });
+  return [...g].map(([lab, idx]) => { const y = +lab.slice(0, 4), t = S.res === "month" ? y + (+lab.slice(5) - 0.5) / 12 : y + (+lab.slice(6) - 0.5) / 4;
+    return {t, label: lab, n: idx.reduce((a, i) => a + m.n_docs[i], 0)}; }).sort((a, b) => a.t - b.t);
+}
+function drawMentions(data) {
+  const box = $("men"); box.innerHTML = "";
+  const ser = data.map(({k, d}) => ({k, pts: counts(d)}));
+  const all = ser.flatMap(s => s.pts);
+  if (!all.length) { box.innerHTML = `<div class="empty">No articles in ${S.y0}–${S.y1} with these settings.</div>`; return; }
+  const W = Math.max(box.clientWidth - 8, 320), narrow = W < 560, H = narrow ? 220 : 260;
+  const m = {l: 52, r: narrow ? 16 : 128, t: 16, b: 30};
+  let t0 = Math.floor(Math.min(...all.map(p => p.t))), t1 = Math.ceil(Math.max(...all.map(p => p.t))); if (t1 - t0 < 2) { t0 -= 1; t1 += 1; }
+  const hi = Math.max(...all.map(p => p.n)) * 1.08 || 1;
+  const X = t => m.l + (t - t0) / (t1 - t0) * (W - m.l - m.r), Y = v => m.t + (hi - v) / hi * (H - m.t - m.b);
+  const svg = el("svg", {viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Articles mentioning each person over time"});
+  const grid = css("--grid"), zero = css("--zero");
+  const cf = new Intl.NumberFormat("en-GB", {notation: "compact"});
+  for (const v of niceTicks(0, hi, 4)) {
+    svg.append(el("line", {x1: m.l, x2: W - m.r, y1: Y(v), y2: Y(v), stroke: v === 0 ? zero : grid, "stroke-width": v === 0 ? 1.25 : 1}));
+    svg.append(el("text", {x: m.l - 8, y: Y(v) + 4, "text-anchor": "end"}, cf.format(v)));
+  }
+  const ystep = (t1 - t0) > 12 ? (narrow ? 4 : 2) : 1;
+  for (let y = t0; y <= t1; y++) if ((y - t0) % ystep === 0 && X(y) < W - m.r + 1) {
+    svg.append(el("line", {x1: X(y), x2: X(y), y1: H - m.b, y2: H - m.b + 4, stroke: zero}));
+    if (y < t1 || (t1 - t0) <= 3) svg.append(el("text", {x: X(y) + (narrow ? 0 : 2), y: H - m.b + 16, "text-anchor": narrow ? "middle" : "start"}, y));
+  }
+  const gap = S.res === "year" ? 1.01 : S.res === "quarter" ? 0.26 : 0.09, labels = [];
+  ser.forEach(s => {
+    const col = css(SERIES[S.sel.indexOf(s.k)]);
+    // fill gaps with zero: a period with no cell means no article
+    const pts = []; s.pts.forEach((p, i) => { if (i && p.t - s.pts[i - 1].t > gap) { pts.push({t: s.pts[i - 1].t + gap * 0.99, n: 0, gapfill: 1}, {t: p.t - gap * 0.99, n: 0, gapfill: 1}); } pts.push(p); });
+    svg.append(el("path", {class: "line", d: "M" + pts.map(p => `${X(p.t)},${Y(p.n)}`).join(" L"), fill: "none", stroke: col, "stroke-width": 2, "stroke-linejoin": "round"}));
+    if (S.res === "year") s.pts.forEach(p => svg.append(el("circle", {cx: X(p.t), cy: Y(p.n), r: 3.5, fill: col, stroke: css("--panel"), "stroke-width": 2})));
+    const last = s.pts[s.pts.length - 1];
+    if (!narrow && last) labels.push({y: Y(last.n), text: displayName(s.k), col});
+  });
+  labels.sort((a, b) => a.y - b.y);
+  for (let i = 1; i < labels.length; i++) if (labels[i].y - labels[i - 1].y < 16) labels[i].y = labels[i - 1].y + 16;
+  for (const l of labels) { svg.append(el("circle", {cx: W - m.r + 12, cy: l.y - 4, r: 4, fill: l.col})); svg.append(el("text", {class: "lab", x: W - m.r + 20, y: l.y}, trunc(l.text, 16))); }
+  const cross = el("line", {y1: m.t, y2: H - m.b, stroke: zero, "stroke-dasharray": "3 3", visibility: "hidden"}); svg.append(cross);
+  const hit = el("rect", {x: m.l, y: m.t, width: W - m.l - m.r, height: H - m.t - m.b, fill: "transparent"}); svg.append(hit); box.append(svg);
+  const brushing = attachBrush(svg, hit, m, W, H, t0, t1);
+  const tip = document.createElement("div"); tip.className = "tip"; tip.hidden = true; box.append(tip);
+  const times = [...new Set(all.map(p => p.t))].sort((a, b) => a - b), labOf = new Map(all.map(p => [p.t, p.label]));
+  const move = ev => {
+    const r = svg.getBoundingClientRect(), t = t0 + ((ev.clientX - r.left) * W / r.width - m.l) / (W - m.l - m.r) * (t1 - t0);
+    let best = times[0]; for (const u of times) if (Math.abs(u - t) < Math.abs(best - t)) best = u;
+    cross.setAttribute("x1", X(best)); cross.setAttribute("x2", X(best)); cross.setAttribute("visibility", "visible");
+    tipAt(box, tip, X(best) * r.width / W, ev.clientY - box.getBoundingClientRect().top, `<b>${labOf.get(best)}</b>` +
+      ser.map(s => { const p = s.pts.find(p => p.t === best); return `<div class="r"><i style="background:var(${SERIES[S.sel.indexOf(s.k)]})"></i><span>${esc(displayName(s.k))}</span><span class="v">${nf.format(p ? p.n : 0)}</span></div>`; }).join(""));
+  };
+  hit.addEventListener("pointermove", move); hit.addEventListener("pointerdown", move);
+  hit.addEventListener("pointerleave", () => { if (!brushing()) { tip.hidden = true; cross.setAttribute("visibility", "hidden"); } });
+}
 function drawOutlets(data) {
   const box = $("byout"); box.innerHTML = "";
   const per = data.map(({k, d}) => {
-    const idx = d.y.year.map((_, i) => i).filter(i => d.y.year[i] >= S.y0 && d.y.year[i] <= S.y1 && (!S.oset || S.oset.has(d.y.o[i])));
+    const idx = d.y.year.map((_, i) => i).filter(i => inPeriod(d.y.year[i]) && (!S.oset || S.oset.has(d.y.o[i])));
     const g = groupBy(idx, j => d.y.o[idx[j]]), out = new Map();
     for (const [o, js] of g) { const r = merge(d.y, js.map(j => idx[j]), S.dim); if (r && r.n >= S.minn) out.set(o, r); }
     return {k, out};
@@ -380,7 +488,7 @@ function drawOutlets(data) {
     svg.append(hit);
   });
   box.append(svg, tip);
-  $("out-sub").textContent = `Sorted by ${displayName(first.k)}. Newspapers with fewer than ${S.minn} articles on a person in ${S.y0}–${S.y1} are left out for that person.`;
+  $("out-sub").textContent = `${S.y0}–${S.y1}. Sorted by ${displayName(first.k)}. Newspapers with fewer than ${S.minn} articles on a person in ${S.y0}–${S.y1} are left out for that person.`;
 }
 
 function drawSummary(data) {
@@ -394,6 +502,72 @@ function drawSummary(data) {
   }).join("") || `<div class="empty">Add a person to see their scores.</div>`;
 }
 
+// ranking: the most mentioned people of the selected period and newspapers, three panels sharing the row order
+const RK = {data: null, by: null, n: 40, min: 500, sort: "n", loading: null};
+function loadRanking() {
+  if (!RK.loading) RK.loading = fetch("ranking.json").then(r => { if (!r.ok) throw new Error("ranking.json " + r.status); return r.json(); }).then(d => {
+    RK.data = d; RK.by = new Map(); d.i.forEach((v, j) => (RK.by.get(v) || RK.by.set(v, []).get(v)).push(j)); });
+  return RK.loading;
+}
+async function drawRanking() {
+  const box = $("rank");
+  try { await loadRanking(); } catch (e) { $("rk-sub").textContent = "The ranking could not be loaded. Reload the page to try again."; return; }
+  const d = RK.data, om = d.outlets.map(o => S.outlets.indexOf(o));
+  const people = [];
+  for (const [i, js] of RK.by) {
+    const idx = js.filter(j => inPeriod(d.year[j]) && (!S.oset || S.oset.has(om[d.o[j]])));
+    if (!idx.length) continue;
+    const n = idx.reduce((a, j) => a + d.n_docs[j], 0); if (n < RK.min) continue;
+    const r = {i, n, name: d.names[i], key: d.keys[i]};
+    for (const dm of Object.keys(DIMS)) { const m = merge(d, idx, dm); r[dm] = m.R; r[dm + "_ci"] = 1.96 * m.se; }
+    people.push(r);
+  }
+  people.sort((a, b) => b.n - a.n);
+  const rows = people.slice(0, RK.n).map((r, j) => ({...r, rank: j + 1}));
+  if (RK.sort !== "n") rows.sort((a, b) => a[RK.sort] - b[RK.sort]);
+  $("rk-sub").textContent = rows.length ? `${S.y0}–${S.y1}${S.oset ? `, ${S.oset.size} newspapers` : ", all newspapers"} · the ${rows.length} people named in the most articles (at least ${nf.format(RK.min)}), ${RK.sort === "n" ? "in order of articles" : "sorted by " + DIMS[RK.sort].label.toLowerCase()}. Dots: averages with 95% intervals; each panel has its own scale. Click a name to add it to the charts above.` : "";
+  box.innerHTML = rows.length ? "" : `<div class="empty">Nobody reaches ${nf.format(RK.min)} articles in ${S.y0}–${S.y1} with these newspapers.</div>`;
+  if (!rows.length) return;
+  const W = Math.max(box.clientWidth - 8, 760), rowH = 19, top = 54, bot = 26, left = 214, gap = 26;
+  const pw = (W - left - gap * 2 - 8) / 3, H = top + bot + rows.length * rowH;
+  const svg = el("svg", {viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Valence, radical framing and momentum of the most mentioned people"});
+  const grid = css("--grid"), zero = css("--zero"), panel = css("--panel"), band = css("--chip"), base = css("--muted");
+  rows.forEach((r, j) => { const y = top + j * rowH;
+    if (j % 2 === 0) svg.append(el("rect", {x: 0, y, width: W, height: rowH, fill: band, "fill-opacity": 0.6}));
+    svg.append(el("text", {class: "rk", x: 28, y: y + 13, "text-anchor": "end"}, r.rank));
+    svg.append(el("text", {class: "nm" + (S.sel.includes(r.key) ? " on" : ""), x: 36, y: y + 13.5}, trunc(r.name, 26))); });
+  Object.entries(DIMS).forEach(([dm, p], j) => {
+    const x0 = left + j * (pw + gap);
+    let lo = Math.min(0, ...rows.map(r => r[dm] - r[dm + "_ci"])), hi = Math.max(0, ...rows.map(r => r[dm] + r[dm + "_ci"]));
+    const pad = (hi - lo) * 0.06 || 0.01; lo -= pad; hi += pad;
+    const X = v => x0 + (v - lo) / (hi - lo) * pw;
+    svg.append(el("text", {class: "ttl", x: x0, y: 18}, p.label));
+    svg.append(el("text", {class: "pole", x: x0, y: 36}, "← " + p.neg));
+    svg.append(el("text", {class: "pole", x: x0 + pw, y: 36, "text-anchor": "end"}, p.pos + " →"));
+    for (const v of niceTicks(lo, hi, 4)) { const z = Math.abs(v) < 1e-12;
+      svg.append(el("line", {x1: X(v), x2: X(v), y1: top - 4, y2: H - bot, stroke: z ? zero : grid, "stroke-width": z ? 1.25 : 1}));
+      svg.append(el("text", {x: X(v), y: H - bot + 15, "text-anchor": "middle"}, z ? "0" : (v > 0 ? "+" : "−") + Math.abs(v).toFixed(Math.abs(v) < 0.1 ? 2 : 1))); }
+    rows.forEach((r, k) => { const y = top + k * rowH + rowH / 2, si = S.sel.indexOf(r.key), col = si >= 0 ? css(SERIES[si]) : base;
+      svg.append(el("line", {x1: X(r[dm] - r[dm + "_ci"]), x2: X(r[dm] + r[dm + "_ci"]), y1: y, y2: y, stroke: col, "stroke-width": 2, "stroke-opacity": 0.45, "stroke-linecap": "round"}));
+      svg.append(el("circle", {cx: X(r[dm]), cy: y, r: si >= 0 ? 5 : 4, fill: col, stroke: panel, "stroke-width": 2})); });
+  });
+  const tip = document.createElement("div"); tip.className = "tip"; tip.hidden = true;
+  rows.forEach((r, k) => { const y = top + k * rowH;
+    const hit = el("rect", {x: 0, y, width: W, height: rowH, fill: "transparent", style: "cursor:pointer"});
+    const show = ev => { const b = box.getBoundingClientRect();
+      tipAt(box, tip, ev.clientX - b.left + box.scrollLeft, ev.clientY - b.top, `<b>${r.rank}. ${esc(r.name)} · ${nf.format(r.n)} articles</b>` +
+        Object.entries(DIMS).map(([dm, p]) => `<div class="r"><i></i><span>${p.label}</span><span class="v">${fmt(r[dm])} ± ${r[dm + "_ci"].toFixed(3)}</span></div>`).join("") +
+        `<div class="r"><i></i><span class="n" style="grid-column:2/4">${S.byKey.has(r.key) ? (S.sel.includes(r.key) ? "In the charts above" : S.sel.length >= 3 ? "Remove someone above to add this person" : "Click to add to the charts above") : ""}</span></div>`); };
+    hit.addEventListener("pointermove", show); hit.addEventListener("pointerleave", () => tip.hidden = true);
+    hit.addEventListener("click", () => { if (S.byKey.has(r.key) && !S.sel.includes(r.key) && S.sel.length < 3) { S.sel.push(r.key); render(); $("t-time").scrollIntoView({behavior: "smooth", block: "start"}); } });
+    svg.append(hit); });
+  box.append(svg, tip);
+}
+$("rk-n").addEventListener("change", e => { RK.n = +e.target.value; drawRanking(); });
+$("rk-min").addEventListener("change", e => { RK.min = +e.target.value; drawRanking(); });
+$("rk-sort").addEventListener("click", e => { const b = e.target.closest("button"); if (!b) return; RK.sort = b.dataset.k;
+  document.querySelectorAll("#rk-sort button").forEach(x => x.setAttribute("aria-pressed", String(x === b))); drawRanking(); });
+
 const esc = s => String(s).replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
 const trunc = (s, n) => s.length > n ? s.slice(0, n - 1) + "…" : s;
 const displayName = k => S.index.names[S.byKey.get(k)][1];
@@ -403,6 +577,7 @@ async function render() {
   if (!S.index) return;
   const my = ++token;
   renderChips();
+  drawRanking();
   const data = (await Promise.all(S.sel.map(async k => ({k, d: await loadName(k)})))).filter(x => x.d);
   if (my !== token) return;
   const monthlyOk = data.length && data.every(x => x.d.m) && !S.oset;
@@ -414,9 +589,11 @@ async function render() {
     hint.textContent = S.oset ? "Quarterly and monthly steps cover all newspapers together; clear the newspaper filter to use them."
       : "Quarterly and monthly steps need every selected person to appear in at least 300 articles.";
   } else hint.hidden = true;
-  $("time-sub").textContent = data.length ? `${DIMS[S.dim].label}, ${S.res === "year" ? "yearly" : S.res === "quarter" ? "quarterly" : "monthly"} means with 95% intervals${S.oset ? `, ${S.oset.size} newspapers` : ""}` : "";
-  if (!data.length) { $("time").innerHTML = `<div class="empty">Add a person to see their scores.</div>`; $("byout").innerHTML = ""; $("ttable").innerHTML = ""; $("summary").innerHTML = ""; $("out-sub").textContent = ""; return; }
-  drawTime(data); drawOutlets(data); drawSummary(data);
+  $("sum-sub").textContent = data.length ? `${S.y0}–${S.y1}${S.oset ? `, ${S.oset.size} newspapers` : ""}` : "";
+  $("time-sub").textContent = data.length ? `${S.y0}–${S.y1} · ${DIMS[S.dim].label}, ${S.res === "year" ? "yearly" : S.res === "quarter" ? "quarterly" : "monthly"} means with 95% intervals${S.oset ? `, ${S.oset.size} newspapers` : ""}. Drag across the chart to zoom, double-click to reset.` : "";
+  if (!data.length) { $("time").innerHTML = `<div class="empty">Add a person to see their scores.</div>`; $("byout").innerHTML = ""; $("men").innerHTML = ""; $("men-sub").textContent = ""; $("ttable").innerHTML = ""; $("summary").innerHTML = ""; $("out-sub").textContent = ""; return; }
+  $("men-sub").textContent = `${S.y0}–${S.y1} · Articles mentioning the person, ${S.res === "year" ? "per year" : S.res === "quarter" ? "per quarter" : "per month"}${S.oset ? `, ${S.oset.size} newspapers` : ""}. Raw counts: the set of newspapers changes over the years, so compare people more safely than years.`;
+  drawTime(data); drawMentions(data); drawOutlets(data); drawSummary(data);
 }
 
 function renderChips() {
@@ -462,8 +639,13 @@ function setSeg(id, v) { document.querySelectorAll(`#${id} button`).forEach(b =>
 $("dim").addEventListener("click", e => { const b = e.target.closest("button"); if (!b) return; S.dim = b.dataset.v; setSeg("dim", S.dim); render(); });
 $("res").addEventListener("click", e => { const b = e.target.closest("button"); if (!b || b.disabled) return; S.res = b.dataset.v; setSeg("res", S.res); render(); });
 $("minn").addEventListener("change", e => { S.minn = +e.target.value; render(); });
-for (const id of ["y0", "y1"]) $(id).addEventListener("change", () => {
-  S.y0 = +$("y0").value; S.y1 = +$("y1").value; if (S.y0 > S.y1) { [S.y0, S.y1] = [S.y1, S.y0]; $("y0").value = S.y0; $("y1").value = S.y1; } render(); });
+function setPeriod(a, b) {
+  if (a > b) [a, b] = [b, a];
+  S.y0 = a; S.y1 = b; $("y0").value = a; $("y1").value = b;
+  $("yreset").hidden = a === 2008 && b === 2026; render();
+}
+for (const id of ["y0", "y1"]) $(id).addEventListener("change", () => setPeriod(+$("y0").value, +$("y1").value));
+$("yreset").addEventListener("click", () => setPeriod(2008, 2026));
 
 function outletUI() {
   const order = S.outlets.map((o, i) => i).sort((a, b) => (OUTLET_NAMES[S.outlets[a]] || "").localeCompare(OUTLET_NAMES[S.outlets[b]] || "", "fr"));

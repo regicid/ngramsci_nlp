@@ -114,6 +114,28 @@ def site(c: pd.DataFrame, names: pd.DataFrame, out: str, min_docs=20, monthly_do
     return len(index), len(y), len(m)
 
 
+def ranking(c: pd.DataFrame, names: pd.DataFrame, out: str, top_all=300, top_year=100, top_outlet=30, outlets=None):
+    """ranking.json for the page's ranking: (year, outlet) cells of every name that can be among the most mentioned of
+    some period or newspaper (top `top_all` overall, `top_year` of a year, `top_outlet` of a newspaper), as flat columns
+    with a name index i. outlets: the index's outlet order (cell o = position in it)."""
+    c = c.assign(year=c["month"].str[:4].astype(int))
+    tot = c.groupby("key")["n_docs"].sum()
+    keep = set(tot.nlargest(top_all).index)
+    for by, n in (("year", top_year), ("outlet", top_outlet)):
+        g = c.groupby([by, "key"])["n_docs"].sum().reset_index()
+        keep |= set(g.sort_values("n_docs", ascending=False).groupby(by).head(n)["key"])
+    keys = sorted(keep, key=lambda k: -tot[k])
+    disp = names[names["key"].isin(keep)].sort_values("n").groupby("key")["full_name"].last()
+    outlets = outlets or sorted(c["outlet"].unique())
+    c = c[c["key"].isin(keep)].assign(o=lambda d: d["outlet"].map({o: i for i, o in enumerate(outlets)}))
+    y = summarise(c, ["key", "year", "o"])
+    y["i"] = y["key"].map({k: i for i, k in enumerate(keys)})
+    cols = ["i", "year", "o", "n_docs", "W", "WW"] + [x for k in DIMS[:3] for x in (k, f"se_{k}")]
+    json.dump({"names": [disp[k] for k in keys], "keys": keys, "outlets": outlets, **{col: y[col].tolist() for col in cols}},
+              open(os.path.join(out, "ranking.json"), "w"), ensure_ascii=False, separators=(",", ":"))
+    return len(keys), len(y)
+
+
 def merged(cells: dict, dim: str):
     """Python twin of the page's merge (tests): cells = columns with n_docs, W, WW, dim, se_dim."""
     W, WW = np.asarray(cells["W"]), np.asarray(cells["WW"])
