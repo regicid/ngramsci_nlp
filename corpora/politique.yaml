@@ -1,7 +1,9 @@
 # Political articles of the French online press, 2008 -> June 2026 (rubrique `politique` of n-gramsci/rubriques-presse,
-# Le Monde excluded: done in the Le Monde corpus), 1,450,278 articles in 305 shards of 5,000.
+# Le Monde excluded: done in the Le Monde corpus), 1,450,278 articles in 305 shards of 5,000; then shards 305-310 =
+# 25,830 articles of 1 Jul -> 22 Nov 2026 (all articles of the 32 outlets classified with regicid/bert-rubriques on cca,
+# top label politique; saclay /data/qcoref_pol/new2026).
 name: politique
-n_shards: 305
+n_shards: 311
 hub_repo: regicid/qcoref-politique-work          # private board
 source: {host: saclay, dir: /data/qcoref_pol/shards, pattern: "shard_{k:05d}.jsonl.gz"}
 ttl_hours: {parse_ner: 3, qwen: 6}
