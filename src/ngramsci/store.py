@@ -206,18 +206,27 @@ class HubStore(Store):
         self.release(stage, k)
 
     def adopt_orphans(self, root, idle_s=3600):
-        """Outboxes of dead workers (no change for an hour) are merged into ours, so their outputs still get published."""
+        """Outboxes of dead workers (no change for an hour) are merged into ours, so their outputs still get published.
+        Several workers start at once on a site: an orphan is first renamed (atomic, one winner), and adopted files are
+        touched so our own outbox never looks idle to the next worker (moves keep mtimes; 2026-11-22 workers adopted
+        each other's live outboxes and crashed)."""
         for d in os.listdir(root):
             p = os.path.join(root, d)
             if p == self.outbox or not os.path.isdir(p):
                 continue
             newest = max((os.path.getmtime(os.path.join(r, f)) for r, _, fs in os.walk(p) for f in fs), default=0)
-            if time.time() - newest > idle_s:
-                for r, _, fs in os.walk(p):
-                    for f in fs:
-                        src = os.path.join(r, f); dst = os.path.join(self.outbox, os.path.relpath(src, p))
-                        os.makedirs(os.path.dirname(dst), exist_ok=True); shutil.move(src, dst)
-                shutil.rmtree(p, ignore_errors=True)
+            if time.time() - newest <= idle_s:
+                continue
+            mine = os.path.join(root, f"{d.split('.adopting-')[0]}.adopting-{self.who}")
+            try:
+                os.rename(p, mine)
+            except OSError:
+                continue                                           # another worker took it
+            for r, _, fs in os.walk(mine):
+                for f in fs:
+                    src = os.path.join(r, f); dst = os.path.join(self.outbox, os.path.relpath(src, mine))
+                    os.makedirs(os.path.dirname(dst), exist_ok=True); shutil.move(src, dst); os.utime(dst)
+            shutil.rmtree(mine, ignore_errors=True)
 
     def _outbox_files(self):
         return [os.path.join(r, f) for r, _, fs in os.walk(self.outbox) for f in fs]
@@ -249,7 +258,10 @@ class HubStore(Store):
                   flush=True)
             return False
         for f in files:
-            os.remove(f)
+            try:
+                os.remove(f)
+            except FileNotFoundError:
+                pass
         self._pending_ops = []
         self._cache.clear()
         self._last, self._backoff = time.time(), 0.0

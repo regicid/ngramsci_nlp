@@ -192,6 +192,18 @@ def test_worker_batches_on_a_rate_limited_hub(tmp_path):
     assert not hub.claims("t_upper")
 
 
+def test_adopting_orphans_once(tmp_path, monkeypatch):
+    """A dead worker's outbox goes to exactly one new worker, and the adopter's outbox does not look idle."""
+    import ngramsci.store as store
+    names = iter(["a-1", "b-2"]); monkeypatch.setattr(store, "who_am_i", lambda: next(names))
+    root = tmp_path / "ob"; dead = root / "dead-1" / "p"; dead.mkdir(parents=True)
+    f = dead / "shard_00001.parquet"; f.write_bytes(b"x"); os.utime(f, (0, 0))
+    a = HubStore("r", str(root), api=FakeApi())
+    assert os.path.exists(os.path.join(a.outbox, "p", "shard_00001.parquet")) and not (root / "dead-1").exists()
+    b = HubStore("r", str(root), api=FakeApi())
+    assert not os.listdir(b.outbox) and os.path.exists(os.path.join(a.outbox, "p", "shard_00001.parquet"))
+
+
 def test_launch_render():
     from ngramsci.launch import render
     site = Site(name="c", ssh="c", code="/code", work="/w", envs={"vllm": {"squashfs": "/e.sqfs", "python_squashfs": "/p.sqfs"}},

@@ -164,6 +164,16 @@ class Worker:
         return info
 
     def loop(self):
+        try:
+            self._loop()
+        finally:                                                 # also on a crash: free our batch, push outputs
+            self.release_queue()
+            for _ in range(12):                                  # last outputs must reach the board
+                if self.board.flush():
+                    break
+                time.sleep(max(60, getattr(self.board, "wait_s", lambda: 0)()))
+
+    def _loop(self):
         fails = 0
         while True:
             if time.time() - self.t0 > self.max_s:
@@ -191,11 +201,6 @@ class Worker:
                 self.failed.add((st.name, k)); self.claimer(st).release(st.name, k)
                 if fails >= 3:
                     _log("3 failures in a row, exiting"); break
-        self.release_queue()
-        for _ in range(12):                                      # last outputs must reach the board
-            if self.board.flush():
-                break
-            time.sleep(max(60, getattr(self.board, "wait_s", lambda: 0)()))
 
 
 def run_local(corpus, stage_names, root, shards=(0,), site=None):
