@@ -1,5 +1,9 @@
-"""Portrayal of people: every person chain of an article (PER coreference chain with a full proper name, « Prénom Nom »)
-gets one segment per mention sentence (nlp.segments), scored by the portrayal ensemble (n-gramsci/portrayal-camembert-large).
+"""Portrayal of people: person chains of an article get one segment per mention sentence (nlp.segments), scored by the
+portrayal ensemble (n-gramsci/portrayal-camembert-large).
+score_all (the default from 2026-11-23 on): every singular PER chain is scored, named or not, with a name-free input (the
+chain's own proper-name mentions become the model's placeholder); naming is post-processing (people(), with_source),
+written alongside as full_name / name_source and recomputable at release time without scoring again. Without score_all
+(the 2026-11-22 runs): only chains people() names are scored, with that name as the target.
 Default: seeds 0 and 1 (gold kappa equal to the 5-seed ensemble, 2.5x cheaper; 1 seed loses 0.015-0.045).
 With `targets` (names) or `targets_file` (one name per line) in the corpus params, only those people are scored: chains
 with a proper-name mention matching the name, in articles naming them in full. Without, every person.
@@ -37,16 +41,32 @@ def load(ctx):
     return sc
 
 
-def full_name(surfaces):
-    props = [t for t in surfaces if NAMEOK.match(t) and t.split()[0].lower().strip("'’") not in STOP]
+SURNAME_RE = re.compile(r"^(?:(?:le|la|de|du|des|d['’])\s*)?[A-ZÀ-Ý][\w'’\-]+$", re.I)
+TITLES = {"M.", "M", "MM.", "Mme", "Mmes", "Mlle", "Madame", "Mademoiselle", "Monsieur", "Messieurs", "Me", "Maître", "Mgr",
+          "Dr", "Docteur", "Pr"}
+FEMININE = {"Mme", "Mmes", "Mlle", "Madame", "Mademoiselle"}
+
+
+def strip_title(t: str) -> tuple[str, str | None]:
+    """« Mme Simone Veil » -> (« Simone Veil », « Mme »): titles are never part of a name."""
+    w, title = t.split(), None
+    while w and w[0] in TITLES:
+        title = title or w[0]; w = w[1:]
+    return " ".join(w), title
+
+
+def full_name(surfaces, compounds=frozenset()):
+    """The chain's most frequent « First Last » mention, titles removed. A compound family name (« Giscard d'Estaing »,
+    « Mendès France »: Surnames.compounds) is not « First Last »."""
+    from ..explorer import name_key
+    props = []
+    for t in surfaces:
+        t, _ = strip_title(t)
+        if " " in t and NAMEOK.match(t) and t.split()[0].lower().strip("'’") not in STOP and name_key(t) not in compounds:
+            props.append(t)
     if not props:
         return None
-    # « Ségolène Royal » over a more frequent « Mme Royal »: an honorific is not a first name (one person, one name)
-    return max(collections.Counter(props).items(), key=lambda kv: (kv[0].split()[0] not in HONORIFIC, kv[1], len(kv[0])))[0]
-
-
-SURNAME_RE = re.compile(r"^(?:(?:le|la|de|du|des|d['’])\s*)?[A-ZÀ-Ý][\w'’\-]+$", re.I)
-TITLES = {"M.", "M", "MM.", "Mme", "Mmes", "Mlle", "Madame", "Monsieur", "Me", "Maître", "Mgr", "Dr", "Pr"}
+    return max(collections.Counter(props).items(), key=lambda kv: (kv[1], len(kv[0])))[0]
 
 
 def surname_of(name: str) -> str:
@@ -54,26 +74,33 @@ def surname_of(name: str) -> str:
     return name.split(" ", 1)[1] if " " in name else name
 
 
-def bare_surname(surfaces):
-    """Most frequent family name of a chain without a full name: « Mélenchon », « M. Mélenchon », « Le Pen »."""
-    c = collections.Counter()
+def bare_surname(surfaces, compounds=frozenset(), with_title=False):
+    """Most frequent family name of a chain without a full name: « Mélenchon », « M. Mélenchon », « Le Pen », and compound
+    family names (« M. Giscard d'Estaing »). with_title: (name, True if it only ever came with a feminine title)."""
+    from ..explorer import name_key
+    c, fem = collections.Counter(), collections.defaultdict(set)
     for t in surfaces:
-        w = t.split()
-        if w and w[0] in TITLES:
-            w = w[1:]
-        t = " ".join(w)
-        if t and t.split()[-1][0].isupper() and SURNAME_RE.match(t) and t.split()[0].lower() not in ("son", "sa", "ses", "ce", "cette"):
-            c[t] += 1
-    return c.most_common(1)[0][0] if c else None
+        t, title = strip_title(t)
+        if not t or t.split()[0].lower() in ("son", "sa", "ses", "ce", "cette"):
+            continue
+        if name_key(t) in compounds or (t.split()[-1][0].isupper() and SURNAME_RE.match(t)):
+            c[t] += 1; fem[t].add(title in FEMININE)
+    if not c:
+        return (None, False) if with_title else None
+    sn = c.most_common(1)[0][0]
+    return (sn, fem[sn] == {True}) if with_title else sn
 
 
 def people(text, ents, min_mentions=1, surnames=None, year=None, only_surname=False, with_source=False):
     """[(chain id, full name, [(onset, offset)])] for the PER chains of one article.
-    A chain with no « First Last » mention but a family name (« Mélenchon », « M. Mélenchon ») takes the article's one
-    « <first> Mélenchon » if there is exactly one, else the person `surnames` (Surnames) gives for that name and year.
+    A chain with no « First Last » mention but a family name (« Mélenchon », « M. Mélenchon », « Mme Veil », « Giscard
+    d'Estaing ») takes the article's one « <first> Mélenchon » if there is exactly one, else the person `surnames`
+    (Surnames) gives for that name and year, except for names that only come with a feminine title (« Mme Chirac » is not
+    the year's dominant Chirac). Titles are never part of a name (« Mme Simone Veil » -> Simone Veil).
     only_surname: return only the chains named that way (to score them on top of an earlier run).
-    with_source: 4-tuples, + where the name comes from: "chain" (the chain's own « First Last »), "article" (« Mme X » or a
-    bare « X » resolved by the article's one « First X »), "family_name" (the person `surnames` gives for that year)."""
+    with_source: 4-tuples, + where the name comes from: "chain" (the chain's own « First Last »), "article" (a family name
+    resolved by the article's one « First X »), "family_name" (the person `surnames` gives for that year)."""
+    compounds = getattr(surnames, "compounds", frozenset())
     named, bare = [], []
     per = ents[(ents["cat"] == "PER") & ents["COREF"].notna()]
     for ch, g in per.groupby("COREF"):
@@ -83,23 +110,21 @@ def people(text, ents, min_mentions=1, surnames=None, year=None, only_surname=Fa
         surf = [text[int(a):int(b)].strip() for a, b, p in zip(g["onset"], g["offset"], g["prop"]) if p == "PROP"]
         surf = [t for t in surf if "///" not in t]
         spans = [(int(a), int(b)) for a, b in zip(g["onset"], g["offset"])]
-        name = full_name(surf)
+        name = full_name(surf, compounds)
         if name:
-            named.append((int(ch), name, spans))
-        elif surnames is not None or only_surname:
-            sn = bare_surname(surf)
+            named.append((int(ch), name, spans, "chain"))
+        else:
+            sn, fem = bare_surname(surf, compounds, with_title=True)
             if sn:
-                bare.append((int(ch), sn, spans))
-    before = {ch: n for ch, n, _ in named}
-    named = [(ch, n, sp, "chain" if before[ch] == n else "article") for ch, n, sp in resolve_honorifics(named)]
+                bare.append((int(ch), sn, spans, fem))
     from ..explorer import name_key
     found = []
-    for ch, sn, spans in bare:
+    for ch, sn, spans, fem in bare:
         k = name_key(sn)
-        here = {n for _, n, _, _ in named if n.split()[0] not in HONORIFIC and name_key(surname_of(n)) == k}
+        here = {n for _, n, _, _ in named if name_key(surname_of(n)) == k}
         if len(here) == 1:
             found.append((ch, here.pop(), spans, "article"))
-        elif not here and surnames is not None and (name := surnames.get(k, year)):
+        elif not here and not fem and surnames is not None and (name := surnames.get(k, year)):
             found.append((ch, name, spans, "family_name"))
     out = found if only_surname else named + found
     return out if with_source else [x[:3] for x in out]
@@ -119,8 +144,9 @@ class Surnames:
     never resolved (Le Pen: Marine, Jean-Marie, Marion; places the NER may take for people). A family name that is also a first name (used as one in >= 10% as
     many articles: Philippe, Bertrand, Laurent) is never resolved either: a bare « Philippe » is usually someone's first
     name. Built from counts {(family key, year, full name): n articles}."""
-    def __init__(self, table: dict):
+    def __init__(self, table: dict, compounds=()):
         self.t = table                                   # {family key: {year: full name}}
+        self.compounds = frozenset(compounds)            # keys of compound family names (« giscard d estaing »)
 
     def get(self, key, year):
         return self.t.get(key, {}).get(int(year)) if year else None
@@ -128,8 +154,23 @@ class Surnames:
     @classmethod
     def build(cls, counts: pd.DataFrame, share=0.9, min_n=20, window=1,
               exclude=("Le Pen", "Marseille", "Paris", "Lyon", "Toulouse", "Nice", "Bordeaux", "France")):
-        """counts: columns key (family key), year, full_name, n."""
+        """counts: columns key (family key), year, full_name, n. Compound family names « A B » are found first: « A » is
+        (almost) never a first name, i.e. >= `share` of the full names starting with « A » are « A B », and « First A B »
+        exists (>= `min_n` articles each): « Giscard d'Estaing », « Mendès France », « Couve de Murville »."""
         from ..explorer import name_key
+        counts = counts.assign(full_name=counts["full_name"].map(lambda n: strip_title(n)[0])).query("full_name != ''")
+        tot = counts.assign(nk=counts["full_name"].map(name_key)).groupby("nk")["n"].sum()
+        first = counts.assign(f=counts["full_name"].map(lambda n: name_key(n.split()[0]))).groupby("f")["n"].sum()
+        compounds = set()
+        for nk, n in tot.items():
+            w = nk.split()
+            if len(w) >= 3 and n >= min_n:
+                r = " ".join(w[1:])
+                if tot.get(r, 0) >= min_n and tot.get(r, 0) >= share * first.get(w[1], 0):
+                    compounds.add(r)
+        # a compound written alone (« Giscard d'Estaing ») is a family name, not a full name: out of the counts
+        counts = counts[~counts["full_name"].map(name_key).isin(compounds)]
+        counts = counts.assign(key=counts["full_name"].map(lambda n: name_key(surname_of(n))))
         ex = {name_key(x) for x in exclude}
         counts = counts[~counts["full_name"].map(lambda n: name_key(n.split()[0]) in NOT_FIRST)]
         first = counts.assign(f=counts["full_name"].map(lambda n: name_key(n.split()[0]))).groupby("f")["n"].sum()
@@ -147,22 +188,25 @@ class Surnames:
         table: dict = {}
         for r in top.itertuples():
             table.setdefault(r.key, {})[int(r.year)] = disp[r.nk]
-        return cls(table)
+        return cls(table, compounds)
 
     def to_json(self, path):
         import json
-        json.dump(self.t, open(path, "w"), ensure_ascii=False)
+        json.dump({"table": self.t, "compounds": sorted(self.compounds)}, open(path, "w"), ensure_ascii=False)
 
     @classmethod
     def from_json(cls, path):
         import json
-        return cls({k: {int(y): n for y, n in v.items()} for k, v in json.load(open(path)).items()})
+        d = json.load(open(path))
+        if "table" not in d:                                   # 2026-11-22 format: the table alone
+            d = {"table": d, "compounds": []}
+        return cls({k: {int(y): n for y, n in v.items()} for k, v in d["table"].items()}, d["compounds"])
 
 
 def name_counts(rows: pd.DataFrame) -> pd.DataFrame:
     """Portrayal-style rows (doc_id, full_name, year) -> {(family key, year, full name): articles}, honorific names out."""
     from ..explorer import name_key
-    r = rows[["doc_id", "full_name", "year"]].drop_duplicates()
+    r = rows[["doc_id", "full_name", "year"]].dropna().drop_duplicates()
     r = r[~r["full_name"].str.split().str[0].isin(HONORIFIC)]
     r = r.assign(key=r["full_name"].map(lambda n: name_key(surname_of(n))))
     return r.groupby(["key", "year", "full_name"]).size().rename("n").reset_index()
@@ -213,11 +257,31 @@ def load_targets(ctx):
     return [(n, name_re(n), full_re(n)) for n in dict.fromkeys(names)]
 
 
+def chain_re(surfaces) -> re.Pattern:
+    """The chain's own proper-name mentions (any whitespace inside), titles optional: the name-free target of score_all.
+    No proper-name mention: a pattern that never matches (mentions are kept as written)."""
+    alts = set()
+    for t in surfaces:
+        t = t.replace("///", " ").strip()
+        if t:
+            alts.add(t); alts.add(strip_title(t)[0])
+    alts = sorted((a for a in alts if a), key=len, reverse=True)
+    if not alts:
+        return re.compile(r"(?!)")
+    return re.compile("|".join(r"\s+".join(map(re.escape, a.split())) for a in alts))
+
+
+def plural(g) -> bool:
+    """A chain is plural when it has more plural than singular mentions (propp's characters `number`)."""
+    n = g["number"] if "number" in g else pd.Series(dtype=object)
+    return int((n == "Plural").sum()) > int((n == "Singular").sum())
+
+
 def load_inputs(text_path, mentions_path, entities_path, exclude_possessive=False):
     """(docs indexed by doc_id, entities with onset/offset): what run() and the family-name counts read."""
     docs = read_text(text_path).set_index("doc_id")
     m = pd.read_parquet(mentions_path, columns=["doc_id", "start_token", "end_token", "onset", "offset"])
-    e = pd.read_parquet(entities_path, columns=["doc_id", "start_token", "end_token", "cat", "prop", "COREF", "POS_tag", "text"])
+    e = pd.read_parquet(entities_path, columns=["doc_id", "start_token", "end_token", "cat", "prop", "COREF", "POS_tag", "text", "number"])
     if exclude_possessive:
         e = e[~possessive(e)]
     e["COREF"] = pd.to_numeric(e["COREF"], errors="coerce")
@@ -235,9 +299,26 @@ def run(k, inp, out, state, ctx):
             continue
         text = docs.at[d, "text"]
         year = str(docs.at[d, "date"])[:4] if "date" in docs.columns else None
+        y = int(year) if year and year.isdigit() else None
+        sn = getattr(state, "surnames", None)
+        if ctx.p("portrayal", "score_all", False) and not targets:
+            names = {c: (n, src) for c, n, _, src in people(text, g, ctx.p("portrayal", "min_mentions", 1), surnames=sn, year=y,
+                                                           with_source=True)}
+            per = g[(g["cat"] == "PER") & g["COREF"].notna()]
+            for ch, h in per.groupby("COREF"):
+                if len(h) < ctx.p("portrayal", "min_mentions", 1) or plural(h):
+                    continue
+                ch = int(ch); spans = [(int(a), int(b)) for a, b in zip(h["onset"], h["offset"])]
+                rx = chain_re([text[int(a):int(b)] for a, b, p in zip(h["onset"], h["offset"], h["prop"]) if p == "PROP"])
+                name, src = names.get(ch, (None, None))
+                for s in build(text, rx, spans):
+                    rows.append({"title": s["title"], "passage": s["passage"], "pattern": rx.pattern})
+                    meta.append({"doc_id": d, "chain": ch, "full_name": name, "name_source": src, "n_mentions": len(spans),
+                                 **{x: s[x] for x in ("mention", "is_title", "kind", "label_flag", "in_quote")}})
+            continue
         found = targeted(text, g, targets) if targets else people(
-            text, g, ctx.p("portrayal", "min_mentions", 1), surnames=getattr(state, "surnames", None),
-            year=int(year) if year and year.isdigit() else None, only_surname=ctx.p("portrayal", "only_surname", False))
+            text, g, ctx.p("portrayal", "min_mentions", 1), surnames=sn, year=y,
+            only_surname=ctx.p("portrayal", "only_surname", False))
         for ch, name, spans in found:
             for s in build(text, name_re(name), spans):
                 rows.append({"title": s["title"], "passage": s["passage"], "full_name": name})

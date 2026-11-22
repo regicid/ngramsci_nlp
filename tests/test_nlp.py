@@ -132,3 +132,67 @@ def test_portrayal_family_names():
     assert {c for c, _, _ in people(text, ents, surnames=sn, year=2017, only_surname=True)} == {0, 2}
     assert {(c, src) for c, _, _, src in people(text, ents, surnames=sn, year=2017, with_source=True)} == \
         {(0, "family_name"), (1, "chain"), (2, "article")}
+
+
+def _ents(text, chains):
+    """chains: [(chain id, surface, prop, number)] -> entities rows with onsets (first occurrence after the previous)."""
+    rows, pos = [], 0
+    for ch, s, prop, num in chains:
+        a = text.index(s, pos); pos = a + 1
+        rows.append({"cat": "PER", "COREF": ch, "prop": prop, "number": num, "onset": a, "offset": a + len(s)})
+    return pd.DataFrame(rows)
+
+
+def test_compound_family_names_and_titles():
+    from ngramsci.stages.portrayal import Surnames, people
+    counts = pd.DataFrame([("x", 1975, "Valéry Giscard d'Estaing", 200), ("x", 1975, "Giscard d'Estaing", 150),
+                           ("x", 1975, "Anne-Aymone Giscard d'Estaing", 5), ("x", 1975, "Simone Veil", 80),
+                           ("x", 1975, "Jacques Chirac", 300), ("x", 1975, "Jean-Luc Mélenchon", 50),
+                           ("x", 1975, "Jean-Luc Godard", 40)], columns=["key", "year", "full_name", "n"])
+    sn = Surnames.build(counts)
+    assert "giscard d estaing" in sn.compounds and "luc melenchon" not in sn.compounds
+    assert sn.get("giscard d estaing", 1975) == "Valéry Giscard d'Estaing" and sn.get("chirac", 1975) == "Jacques Chirac"
+    text = "Budget///M. Giscard d'Estaing parle. Giscard d'Estaing insiste. Mme Simone Veil répond. Mme Veil sourit. Mme Chirac aussi."
+    ents = _ents(text, [(0, "M. Giscard d'Estaing", "PROP", "Singular"), (1, "Giscard d'Estaing", "PROP", "Singular"),
+                        (2, "Mme Simone Veil", "PROP", "Singular"), (3, "Mme Veil", "PROP", "Singular"),
+                        (4, "Mme Chirac", "PROP", "Singular")])
+    got = {c: (n, src) for c, n, _, src in people(text, ents, surnames=sn, year=1975, with_source=True)}
+    assert got[0] == got[1] == ("Valéry Giscard d'Estaing", "family_name")
+    assert got[2] == ("Simone Veil", "chain") and got[3] == ("Simone Veil", "article")
+    assert 4 not in got                                            # « Mme Chirac » is not the year's dominant Chirac
+
+
+def test_surnames_json_formats(tmp_path):
+    import json
+    from ngramsci.stages.portrayal import Surnames
+    p = tmp_path / "s.json"; json.dump({"veil": {"1975": "Simone Veil"}}, open(p, "w"))       # 2026-11-22 format
+    assert Surnames.from_json(str(p)).get("veil", 1975) == "Simone Veil"
+    Surnames({"veil": {1975: "Simone Veil"}}, ["giscard d estaing"]).to_json(str(p))
+    s = Surnames.from_json(str(p)); assert s.compounds == {"giscard d estaing"} and s.get("veil", 1975) == "Simone Veil"
+
+
+def test_score_all_name_free():
+    """score_all: every singular chain is scored, named or not; the target is the chain's own proper-name mentions."""
+    import types
+    import ngramsci.stages.portrayal as P
+    text = "Réunion///Le ministre arrive. Il parle à Paul Martin. Les manifestants crient. Ils attendent."
+    ents = _ents(text, [(0, "Le ministre", "NOM", "Singular"), (0, "Il", "PRON", "Singular"), (1, "Paul Martin", "PROP", "Singular"),
+                        (2, "Les manifestants", "NOM", "Plural"), (2, "Ils", "PRON", "Plural")])
+    seen = []
+    def score(rows, batch=64):
+        seen.extend(rows); return [{"pertinent": 1.0, "journaliste": 0.0, "valence": [0, 1, 0], "extremisme": [0, 1, 0], "dynamique": [0, 1, 0]}] * len(rows)
+    docs = pd.DataFrame({"doc_id": ["d"], "text": [text], "date": ["2020-01-01"]}).set_index("doc_id")
+    orig = P.load_inputs
+    P.load_inputs = lambda *a, **k: (docs, ents.assign(doc_id="d"))
+    try:
+        ctx = types.SimpleNamespace(p=lambda st, key, d=None: {"score_all": True}.get(key, d))
+        import tempfile, os
+        out = os.path.join(tempfile.mkdtemp(), "p.parquet")
+        P.run(0, {"text": "", "mentions": "", "entities": ""}, {"portrayal": out}, types.SimpleNamespace(score=score, revision="stub"), ctx)
+        df = pd.read_parquet(out)
+    finally:
+        P.load_inputs = orig
+    assert set(df.chain) == {0, 1}                                  # the plural chain is not scored
+    assert df[df.chain == 0].full_name.isna().all() and (df[df.chain == 1].full_name == "Paul Martin").all()
+    assert all("pattern" in r and "full_name" not in r for r in seen)
+    assert re.compile(seen[-1]["pattern"]).search("Paul Martin") and not re.compile(next(r for r in seen if "ministre" in r["passage"])["pattern"]).search("Le ministre")

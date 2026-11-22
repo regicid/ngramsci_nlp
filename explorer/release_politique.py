@@ -25,7 +25,9 @@ def one(k):
     docs, ents = load_inputs(txt, get(f"mentions/shard_{k:05d}.ner.parquet"), fe_in, exclude_possessive=True)
     ds = docs["date"]
     c, e = pd.read_parquet(get(f"characters/shard_{k:05d}.parquet")), pd.read_parquet(fe_in)
-    ps = [pd.read_parquet(f) for f in (get(f"portrayal/shard_{k:05d}.parquet"), get(f"portrayal_surnames/shard_{k:05d}.parquet")) if f]
+    allp = get(f"portrayal_all/shard_{k:05d}.parquet")           # score_all run: every singular chain, alone
+    ps = [pd.read_parquet(allp)] if allp else \
+        [pd.read_parquet(f) for f in (get(f"portrayal/shard_{k:05d}.parquet"), get(f"portrayal_surnames/shard_{k:05d}.parquet")) if f]
     p = pd.concat(ps, ignore_index=True)
     co, eo = Rl.characters(c, p, ds, sources=Rl.name_sources(docs, ents, SN)), Rl.entities(e, ds)
     fc, fe = f"{OUT}/data/characters_qwen4b/politique/part-{k:05d}.parquet", f"{OUT}/data/entities_qwen4b/politique/part-{k:05d}.parquet"

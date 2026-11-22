@@ -1,0 +1,15 @@
+# Libération, Le Figaro and Le Journal du Dimanche: every article of the scrape (saclay CSVs of 22 Nov 2026) except those
+# already in the politique corpus (its 311 shards: 284,929 articles of these outlets), 3,207,848 articles in 642 shards of
+# <= 5,000 (le_figaro 2,309,138 = shards 0-461, le_journal_du_dimanche 123,971 = 462-486, liberation 774,739 = 487-641;
+# saclay /data/qcoref_full/shards/shards.tsv). politique + presse3 = the whole of the three outlets.
+name: presse3
+n_shards: 642
+hub_repo: regicid/qcoref-presse3-work          # private board
+source: {host: saclay, dir: /data/qcoref_full/shards, pattern: "shard_{k:05d}.jsonl.gz"}
+ttl_hours: {parse_ner: 3, qwen: 6}
+params:
+  parse_ner: {k: 10}
+  qwen: {single_process: true}
+  quotes: {compute_type: float16, split: chunks}
+  portrayal: {seeds: [0], exclude_possessive: true, revision: 678e23cc21ff9026f5a183ef7905ee5a0ac119d3,   # v2, as politique
+              surnames_file: data/surnames.json}

@@ -5,6 +5,8 @@ name: lemonde
 n_shards: 656
 layout:
   text: text/shard_{k:05d}.parquet
+  portrayal: portrayal_all/shard_{k:05d}.parquet   # next run (score_all); the 2026-11-22 run is in portrayal/
 params:
   portrayal: {seeds: [0], exclude_possessive: true, revision: 678e23cc21ff9026f5a183ef7905ee5a0ac119d3,   # v2, as politique
-              surnames_file: data/surnames.json}
+              surnames_file: data/surnames.json,
+              score_all: true}   # next run: every singular chain, name-free (naming = post-processing)

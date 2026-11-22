@@ -1,10 +1,11 @@
 """Public release of a corpus's coreference + portrayal results in regicid/propp-press (data/*_qwen4b/<corpus>/).
 
-entities: the board's entities shard as is. characters: the board's characters shard + per-character portrayal
-(chains the portrayal stage scored: PER chains with a full name; others get nulls and portrayal_n = 0):
-  full_name               the chain's name (most frequent proper « First Last » mention, or see name_source)
-  name_source             chain: the chain's own « First Last »; article: « Mme X » or a bare « X » named by the
-                          article's one « First X »; family_name: « X » alone, the person it stands for that year
+entities: the board's entities shard as is. characters: the board's characters shard + per-character portrayal (the
+chains the portrayal stage scored: every singular person chain with score_all, named chains in the 2026-11-22 runs;
+others get portrayal_n = 0 and nulls), and names from post-processing (people() at release time, for every character):
+  full_name               the person's name, or null
+  name_source             chain: the chain's own « First Last »; article: a family name (« X », « M. X », « Mme X ») named
+                          by the article's one « First X »; family_name: « X » alone, the person it stands for that year
   portrayal_n             passages scored (one per sentence mentioning the person, with its context)
   portrayal_pertinent     mean P(the passage says something about the person)
   portrayal_valence       sum w (P(+) - P(-)) / sum w, w = P(pertinent); likewise extremisme, dynamique
@@ -56,7 +57,8 @@ def per_character(port: pd.DataFrame) -> pd.DataFrame:
         agg[k] = w * (p[f"p_{k}_pos"].to_numpy() - p[f"p_{k}_neg"].to_numpy())
     g = agg.groupby(["doc_id", "chain"], sort=False)
     s = g.sum()
-    out = pd.DataFrame({"full_name": p.groupby(["doc_id", "chain"], sort=False)["full_name"].first(),
+    out = pd.DataFrame({"full_name": p.groupby(["doc_id", "chain"], sort=False)["full_name"].first() if "full_name" in p
+                        else None,
                         "portrayal_n": g.size().astype("int32"),
                         "portrayal_pertinent": (s["w"] / g.size()).astype("float32")})
     for k in DIMS + ["journaliste"]:
@@ -76,23 +78,15 @@ def per_character(port: pd.DataFrame) -> pd.DataFrame:
 
 def characters(chars: pd.DataFrame, port: pd.DataFrame, dates: pd.Series, sources: pd.DataFrame | None = None,
                newspaper=None) -> pd.DataFrame:
-    """sources: name_sources() output; its names must equal the portrayal rows' (checked)."""
+    """sources: name_sources() output, the names (post-processing): every character gets its name from there, scored or
+    not, and every scored chain keeps its scores, named or not. Without sources, the names the portrayal rows carry."""
     pc = per_character(port).rename(columns={"chain": "char_id"})
-    if sources is not None:
-        sc = sources.rename(columns={"chain": "char_id", "full_name": "src_name"})
-        pc = pc.merge(sc, on=["doc_id", "char_id"], how="left")
-        # a family name the current table no longer resolves (it was scored with an earlier, looser table): unscored
-        gone = pc["src_name"].isna()
-        pc, port = pc[~gone], port[~port.set_index(["doc_id", "chain"]).index.isin(pc[gone].set_index(["doc_id", "char_id"]).index)]
-        characters.dropped = int(gone.sum())
-        bad = pc["src_name"].ne(pc["full_name"])
-        if bad.any():
-            raise ValueError(f"{int(bad.sum())} characters named differently than in portrayal, e.g. "
-                             f"{pc[bad][['doc_id', 'char_id', 'full_name', 'src_name']].head(3).to_dict('records')}")
-        pc = pc.drop(columns="src_name")
-        pc.insert(pc.columns.get_loc("full_name") + 1, "name_source", pc.pop("name_source"))
     pc["char_id"] = pc["char_id"].astype(chars["char_id"].dtype)
-    out = chars.merge(pc, on=["doc_id", "char_id"], how="left", validate="one_to_one")
+    names = pc[["doc_id", "char_id", "full_name"]].assign(name_source=None) if sources is None else \
+        sources.rename(columns={"chain": "char_id"}).astype({"char_id": chars["char_id"].dtype})
+    pc = pc.drop(columns=["full_name"])
+    out = chars.merge(names, on=["doc_id", "char_id"], how="left", validate="one_to_one")
+    out = out.merge(pc, on=["doc_id", "char_id"], how="left", validate="one_to_one")
     if len(out) != len(chars) or out["portrayal_n"].notna().sum() != len(pc) or out["portrayal_n"].sum() != len(port):
         raise ValueError("portrayal rows do not all match a character")
     out["portrayal_n"] = out["portrayal_n"].fillna(0).astype("int32")

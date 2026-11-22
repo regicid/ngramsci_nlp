@@ -14,7 +14,8 @@ def one(k, s, g):
     docs, ents = load_inputs(f"{PRIV}/text/shard_{k:05d}.parquet", f"{BOARD}/mentions/shard_{k:05d}.ner.parquet",
                              f"{BOARD}/entities/shard_{k:05d}.parquet", exclude_possessive=True)
     c = pd.read_parquet(f"{Q}/out/characters_{s:05d}_{g}.v3.parquet")
-    p = pd.read_parquet(f"{BOARD}/portrayal/shard_{k:05d}.parquet")
+    allp = f"{BOARD}/portrayal_all/shard_{k:05d}.parquet"        # score_all run, when there is one
+    p = pd.read_parquet(allp if os.path.exists(allp) else f"{BOARD}/portrayal/shard_{k:05d}.parquet")
     co = Rl.characters(c, p, docs["date"], sources=Rl.name_sources(docs, ents, SN), newspaper="lemonde")
     f = f"{OUT}/data/characters_qwen4b/lemonde/part-{s:05d}-{g}.parquet"
     co.to_parquet(f, index=False)

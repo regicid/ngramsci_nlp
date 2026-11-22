@@ -63,7 +63,7 @@ def cells_from_characters(ch: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]
     """The same cells as cells(), from a release characters file (one row per character: portrayal_n passages with mean
     P(pertinent) and weighted means), so the page shows exactly what is published. Characters of one name in one article
     are one article, as in cells()."""
-    d = ch[ch["portrayal_n"] > 0][["doc_id", "date", "newspaper", "full_name", "portrayal_n", "portrayal_pertinent"]
+    d = ch[(ch["portrayal_n"] > 0) & ch["full_name"].notna()][["doc_id", "date", "newspaper", "full_name", "portrayal_n", "portrayal_pertinent"]
                                   + [f"portrayal_{k}" for k in DIMS]].copy()
     d["key"] = d["full_name"].map(name_key)
     d = d[d["key"] != ""]

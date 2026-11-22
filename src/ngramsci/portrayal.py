@@ -79,7 +79,10 @@ class Scorer:
         with torch.inference_mode():
             for s in range(0, len(order), batch):
                 idx = order[s:s + batch]
-                T, S = zip(*[build_input(rows[i], rxs.setdefault(rows[i]["full_name"], name_re(rows[i]["full_name"]))) for i in idx])
+                # the target: a name (name_re) or, for score_all rows, the chain's own proper-name mentions ("pattern")
+                key = lambda r: ("p", r["pattern"]) if "pattern" in r else ("n", r["full_name"])
+                T, S = zip(*[build_input(rows[i], rxs.setdefault(key(rows[i]), re.compile(rows[i]["pattern"]) if "pattern" in rows[i]
+                                                                  else name_re(rows[i]["full_name"]))) for i in idx])
                 e = self.tok(list(T), truncation=True, max_length=MAXLEN, padding=True, return_offsets_mapping=True, return_tensors="pt")
                 off = e.pop("offset_mapping").numpy(); att = e["attention_mask"]
                 tm = torch.zeros_like(att, dtype=torch.float32)

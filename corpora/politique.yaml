@@ -14,4 +14,7 @@ params:
   # v2 with family names (data/surnames.json). Shards 0-304 were scored before family names existed: their extra chains
   # are scored by corpora/politique_surnames.yaml into portrayal_surnames/; portrayal/ + portrayal_surnames/ = every person.
   portrayal: {seeds: [0], exclude_possessive: true, revision: 678e23cc21ff9026f5a183ef7905ee5a0ac119d3,
-              surnames_file: data/surnames.json}
+              surnames_file: data/surnames.json,
+              score_all: true}   # next run: every singular chain, name-free -> portrayal_all/ (naming = post-processing)
+layout:
+  portrayal: portrayal_all/shard_{k:05d}.parquet
