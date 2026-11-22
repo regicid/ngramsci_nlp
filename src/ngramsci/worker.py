@@ -46,6 +46,9 @@ class Worker:
     def store_of(self, o: S.Output):
         return self.priv if o.private else self.board
 
+    def claimer(self, st):                                   # site-local stages: disk locks, no hub commits
+        return self.priv if st.local else self.board
+
     def available(self, name: str) -> set[int]:
         _, o = S.producer(name)
         return self.store_of(o).done(o)
@@ -73,7 +76,8 @@ class Worker:
             if not ready:
                 continue
             ttl = self.c.ttl_hours.get(st.name, st.ttl_hours)
-            claims = self.board.claims(st.name)
+            cl = self.claimer(st)
+            claims = cl.claims(st.name)
             for k in todo:
                 if k not in ready:
                     continue
@@ -82,9 +86,9 @@ class Worker:
                 c = claims.get(k)
                 if c and time.time() - c[0] < ttl * 3600:
                     continue
-                if self.board.claim(st.name, k, ttl):
+                if cl.claim(st.name, k, ttl):
                     if k in self.store_of(st.done_output).done(st.done_output, refresh=True):
-                        self.board.release(st.name, k); continue      # finished meanwhile (our listing was cached)
+                        cl.release(st.name, k); continue      # finished meanwhile (our listing was cached)
                     return st, k, waiting
         return None, None, waiting
 
@@ -117,7 +121,7 @@ class Worker:
             self.priv.publish(st.name, k, prv, st.done_output if st.done_output.private else prv[-1][0])
         if pub:
             self.board.publish(st.name, k, pub, st.done_output if not st.done_output.private else pub[-1][0])
-        else:
+        elif not st.local:
             self.board.release(st.name, k)
         for name, p in inp.items():                              # downloaded inputs are not kept
             if p.startswith(cache) and os.path.exists(p):
@@ -144,7 +148,7 @@ class Worker:
                 _log(f"{st.name} shard {k}: stopped at the deadline, partial work kept"); break
             except Exception:
                 traceback.print_exc(); fails += 1
-                self.failed.add((st.name, k)); self.board.release(st.name, k)
+                self.failed.add((st.name, k)); self.claimer(st).release(st.name, k)
                 if fails >= 3:
                     _log("3 failures in a row, exiting"); break
         for _ in range(12):                                      # last outputs must reach the board

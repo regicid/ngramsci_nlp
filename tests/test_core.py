@@ -154,3 +154,27 @@ def test_outputs_with_same_basename(tmp_path):
     _text(str(tmp_path), 0)
     run_local(Corpus(name="toy", n_shards=1), ["t_two"], str(tmp_path))
     assert open(tmp_path / "a" / "shard_00000.txt").read() == "a" and open(tmp_path / "b" / "shard_00000.txt").read() == "b"
+
+
+def _priv(k, inp, out, state, ctx):
+    open(out["p"], "w").write("x")
+    return {}
+
+
+S.register(S.Stage("t_priv", inputs=["text"], env="x", gpu=False, run=_priv,
+                   outputs=[S.Output("p", "p/shard_{k:05d}.txt", private=True)]))
+
+
+def test_local_stage_claims_stay_on_site(tmp_path):
+    """A stage with only private inputs/outputs (parse) claims with disk locks: no hub commit at all."""
+    api = FakeApi()
+    hub = HubStore("r", str(tmp_path / "ob"), api=api); hub.LIST_EVERY = 0
+    priv = DiskStore(str(tmp_path / "priv"))
+    for k in range(3):
+        _text(str(tmp_path / "priv"), k)
+    assert S.get("t_priv").local and not S.get("t_upper").local
+    w = Worker(Corpus(name="toy", n_shards=3), Site(name="A", ssh=None, code=".", work=str(tmp_path / "w")), ["t_priv"],
+               board=hub, private=priv, poll=0)
+    w.loop()
+    assert priv.done(S.get("t_priv").done_output) == {0, 1, 2}
+    assert api.commits == 0 and not priv.claims("t_priv")

@@ -66,6 +66,11 @@ class Stage:
     def out(self, name: str) -> Output:
         return next(o for o in self.outputs if o.name == name)
 
+    @property
+    def local(self) -> bool:
+        """Only private inputs and outputs: the stage never touches the board, so its claims stay on the site."""
+        return all(o.private for o in self.outputs) and all(producer(n)[1].private for n in self.inputs)
+
 
 REGISTRY: dict[str, Stage] = {}
 
@@ -92,7 +97,7 @@ TEXT = Output("text", "text/shard_{k:05d}.jsonl.gz", private=True)
 
 def load_all():
     """Import the built-in stages (they register themselves). Imports are light: models load in Stage.load."""
-    from .stages import rubriques, parse_ner, qwen, assemble, quotes, portrayal  # noqa: F401
+    from .stages import rubriques, parse_ner, parse, qwen, assemble, quotes, portrayal  # noqa: F401
 
 
 def get(name: str) -> Stage:

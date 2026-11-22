@@ -17,6 +17,7 @@ from ..stage import Output, Stage, register
 from ..textio import read_text, write_jsonl_gz
 
 LONG = 100_000
+TOKENS = Output("tokens", "tokens/shard_{k:05d}.parquet", private=True)
 
 
 def load(ctx):
@@ -151,7 +152,7 @@ def run(k, inp, out, state, ctx):
 
 register(Stage(
     "parse_ner", inputs=["text"], env="propp", gpu=True, ttl_hours=3, load=load, run=run, doc=__doc__,
-    outputs=[Output("tokens", "tokens/shard_{k:05d}.parquet", private=True),
+    outputs=[TOKENS,
              Output("mentions", "mentions/shard_{k:05d}.ner.parquet"),
              Output("windows", "windows_k10/shard_{k:05d}.ner.jsonl.gz"),
              Output("ner_done", "ner_done/shard_{k:05d}.json")],

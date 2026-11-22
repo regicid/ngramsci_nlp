@@ -55,6 +55,10 @@ def assemble_doc(doc_id, paper, m, tdf, wins, outs, fix_apos=False):
     ents["confidence"] = pd.to_numeric(ents["confidence"], errors="coerce")
     if ents["end_token"].max() >= len(tdf):
         raise ValueError("token mismatch")
+    if "onset" in m and len(m):                     # tokens re-parsed apart from the mentions must line up with them
+        on = pd.to_numeric(m["onset"], errors="coerce").to_numpy()
+        if (tdf["byte_onset"].to_numpy()[ents["start_token"].astype(int).to_numpy()] != on).any():
+            raise ValueError("token mismatch (mention offsets)")
     ents = add_features_to_entities(ents, tdf)
     mids = m["mid"].tolist()
     per_mids = [mid for mid, p in zip(mids, ents["cat"].isin(COREF_CATS).tolist()) if p]
