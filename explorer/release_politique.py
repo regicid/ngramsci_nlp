@@ -1,6 +1,7 @@
 """Build the propp-press release files of politique (characters + portrayal, entities), one task of an array.
 usage (cca htc array): python explorer/release_politique.py I N   -> <W>/release/data/{characters,entities}_qwen4b/politique/
-Reads the board (characters/, entities/, portrayal/ and, when present, portrayal_surnames/) and dates from the private text."""
+Reads the board (characters/, entities/, portrayal/, and portrayal_surnames/ with SURNAMES=1 once that pass is complete
+on every shard) and dates from the private text."""
 import gzip, json, os, sys
 import pandas as pd
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
@@ -20,7 +21,8 @@ def one(k):
     with gzip.open(f"{TXT}/shard_{k:05d}.jsonl.gz", "rt") as f:
         ds = pd.Series({(d := json.loads(l))["doc_id"]: d.get("date") for l in f})
     c, e = pd.read_parquet(get(f"characters/shard_{k:05d}.parquet")), pd.read_parquet(get(f"entities/shard_{k:05d}.parquet"))
-    ps = [pd.read_parquet(p) for p in (get(f"portrayal/shard_{k:05d}.parquet"), get(f"portrayal_surnames/shard_{k:05d}.parquet")) if p]
+    srcs = [f"portrayal/shard_{k:05d}.parquet"] + ([f"portrayal_surnames/shard_{k:05d}.parquet"] if os.environ.get("SURNAMES") == "1" else [])
+    ps = [pd.read_parquet(get(s)) for s in srcs]
     p = pd.concat(ps, ignore_index=True)
     co, eo = Rl.characters(c, p, ds), Rl.entities(e, ds)
     fc, fe = f"{OUT}/data/characters_qwen4b/politique/part-{k:05d}.parquet", f"{OUT}/data/entities_qwen4b/politique/part-{k:05d}.parquet"
@@ -36,6 +38,4 @@ if __name__ == "__main__":
     res = []
     for k in range(i, 305, n):
         res.append(one(k)); print(res[-1], flush=True)
-        for f in os.listdir(CACHE) if False else []:
-            pass
     json.dump(res, open(f"{OUT}/slice_{i:03d}.json", "w")); print("DONE", flush=True)
