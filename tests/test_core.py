@@ -254,3 +254,27 @@ def test_local_stage_claims_stay_on_site(tmp_path):
     w.loop()
     assert priv.done(S.get("t_priv").done_output) == {0, 1, 2}
     assert api.commits == 0 and not priv.claims("t_priv")
+
+
+def test_explorer_cells_and_merge():
+    """Cells keep sums that give the exact clustered mean/SE; the page's merge of rounded cells stays close."""
+    import numpy as np, pandas as pd
+    from ngramsci import explorer as E
+    rng = np.random.default_rng(0); n = 400
+    docs = [f"le_figaro_{i}" for i in rng.integers(0, 60, n)]
+    p = pd.DataFrame({"doc_id": docs, "full_name": rng.choice(["Jean-Luc Mélenchon", "jean-luc melenchon"], n), "p_pertinent": rng.random(n)})
+    for k in ["valence", "extremisme", "dynamique"]:
+        a = rng.random(n); p[f"p_{k}_pos"], p[f"p_{k}_neg"] = a * 0.5, (1 - a) * 0.4
+    p["p_journaliste"] = rng.random(n)
+    dates = pd.Series({d: f"20{10 + int(d.split('_')[-1]) % 5}-0{1 + int(d.split('_')[-1]) % 9}-01" for d in set(docs)})
+    c, names = E.cells(p, dates)
+    assert set(c["key"]) == {"jean luc melenchon"} and c["n_docs"].sum() == len(set(docs))
+    w, x = p["p_pertinent"], p["p_valence_pos"] - p["p_valence_neg"]
+    R0 = (w * x).sum() / w.sum()
+    d = pd.DataFrame({"d": docs, "w": w, "wx": w * x}).groupby("d").sum()
+    se0 = np.sqrt(((d.wx - R0 * d.w) ** 2).sum()) / d.w.sum()
+    R, se = E.stats({k: c[k].to_numpy() for k in c.columns}, "valence")
+    assert abs(R - R0) < 1e-12 and abs(se - se0) < 1e-12
+    y = E.summarise(c.assign(year=c["month"].str[:4]), ["key", "year"])
+    Ra, sea = E.merged({k: y[k].to_numpy() for k in y.columns}, "valence")
+    assert abs(Ra - R0) < 1e-3 and abs(sea / se0 - 1) < 0.1

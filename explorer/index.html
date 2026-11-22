@@ -1,0 +1,497 @@
+<title>Political Portraits</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one column; a control strip, then the time chart, the newspaper chart, the per-name summary, the method notes. */
+:root {
+  --bg: #fbfbfa; --panel: #ffffff; --fg: #15171a; --fg2: #4a4f57; --muted: #7b818a;
+  --rule: #e3e5e8; --grid: #eceef1; --zero: #9aa0a8; --chip: #f1f2f4; --focus: #2a78d6;
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a;
+  --f-display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --f-body: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+  --f-data: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #17191c; --panel: #1e2125; --fg: #eef0f2; --fg2: #bfc4cb; --muted: #8d939b;
+  --rule: #30343a; --grid: #272a2f; --zero: #6c727a; --chip: #262a2f; --focus: #3987e5;
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #17191c; --panel: #1e2125; --fg: #eef0f2; --fg2: #bfc4cb; --muted: #8d939b;
+  --rule: #30343a; --grid: #272a2f; --zero: #6c727a; --chip: #262a2f; --focus: #3987e5;
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; color-scheme: dark }
+body { background: var(--bg); color: var(--fg); font: 16px/1.5 var(--f-body); }
+.wrap { max-width: 1080px; margin: 0 auto; padding-block: 28px 48px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid; gap: 28px; }
+h1 { font: 700 clamp(28px, 4.4vw, 42px)/1.05 var(--f-display); letter-spacing: -0.01em; margin: 0; text-wrap: balance; }
+h2 { font: 600 19px/1.2 var(--f-display); margin: 0; text-wrap: balance; }
+.lede { color: var(--fg2); max-width: 68ch; margin: 8px 0 0; }
+.eyebrow { font: 500 12px/1 var(--f-data); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+header { display: grid; gap: 6px; }
+
+.controls { display: grid; gap: 14px; background: var(--panel); border: 1px solid var(--rule); border-radius: 10px; padding: 16px; }
+.row { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; }
+.field { display: grid; gap: 4px; min-width: 0; }
+.field > span { font: 500 11px/1 var(--f-data); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.search { position: relative; flex: 1 1 280px; min-width: 0; }
+.search input { width: 100%; box-sizing: border-box; font: 16px var(--f-body); padding: 9px 12px; border-radius: 8px;
+  border: 1px solid var(--rule); background: var(--bg); color: var(--fg); }
+.search input:focus-visible, select:focus-visible, button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.suggest { position: absolute; z-index: 5; left: 0; right: 0; top: calc(100% + 4px); background: var(--panel); border: 1px solid var(--rule);
+  border-radius: 8px; box-shadow: 0 8px 24px rgb(0 0 0 / 0.12); max-height: 340px; overflow-y: auto; padding: 4px; margin: 0; list-style: none; }
+.suggest li { display: flex; justify-content: space-between; gap: 12px; padding: 7px 10px; border-radius: 6px; cursor: pointer; }
+.suggest li[aria-selected="true"], .suggest li:hover { background: var(--chip); }
+.suggest .n { font: 12px var(--f-data); color: var(--muted); white-space: nowrap; }
+.suggest .alt { color: var(--muted); font-size: 13px; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { display: inline-flex; align-items: center; gap: 8px; padding: 5px 6px 5px 10px; border-radius: 999px; background: var(--chip); font-weight: 600; }
+.chip i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.chip small { font: 12px var(--f-data); color: var(--muted); font-weight: 400; }
+.chip button { border: 0; background: transparent; color: var(--fg2); cursor: pointer; font-size: 16px; line-height: 1; padding: 2px 6px; border-radius: 50%; }
+.chip button:hover { background: var(--rule); }
+.hint { color: var(--muted); font-size: 14px; }
+.seg { display: inline-flex; border: 1px solid var(--rule); border-radius: 8px; overflow: hidden; }
+.seg button { border: 0; background: var(--bg); color: var(--fg2); font: 600 14px var(--f-body); padding: 7px 12px; cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--rule); }
+.seg button[aria-pressed="true"] { background: var(--fg); color: var(--bg); }
+.seg button:disabled { color: var(--muted); cursor: not-allowed; opacity: 0.55; }
+select { font: 14px var(--f-body); padding: 7px 8px; border-radius: 8px; border: 1px solid var(--rule); background: var(--bg); color: var(--fg); max-width: 100%; }
+details.outlets { min-width: 0; }
+details.outlets summary { cursor: pointer; font: 600 14px var(--f-body); padding: 7px 10px; border: 1px solid var(--rule); border-radius: 8px; background: var(--bg); list-style: none; }
+details.outlets summary::-webkit-details-marker { display: none; }
+details.outlets[open] summary { border-color: var(--focus); }
+.olist { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 4px 14px; padding: 10px 2px 2px; }
+.olist label { display: flex; gap: 6px; align-items: center; font-size: 14px; }
+.olist .tools { grid-column: 1 / -1; display: flex; gap: 10px; }
+.linkbtn { border: 0; background: none; color: var(--focus); font: 600 13px var(--f-body); cursor: pointer; padding: 0; }
+
+section.card { display: grid; gap: 12px; }
+.cardhead { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 8px 16px; }
+.sub { color: var(--fg2); font-size: 14px; }
+.chart { position: relative; background: var(--panel); border: 1px solid var(--rule); border-radius: 10px; padding: 8px 4px 4px; min-width: 0; }
+.chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+.chart text { font-family: var(--f-data); font-size: 11px; fill: var(--muted); }
+.chart .lab { font-family: var(--f-body); font-size: 12.5px; font-weight: 600; fill: var(--fg); }
+.chart .olab { font-family: var(--f-body); font-size: 13px; fill: var(--fg2); }
+.chart .pole { font-family: var(--f-body); font-size: 11.5px; fill: var(--muted); }
+.tip { position: absolute; pointer-events: none; z-index: 4; background: var(--panel); color: var(--fg); border: 1px solid var(--rule);
+  border-radius: 8px; box-shadow: 0 6px 20px rgb(0 0 0 / 0.14); padding: 8px 10px; font-size: 13px; min-width: 180px; max-width: 280px; }
+.tip b { font: 600 12px var(--f-data); color: var(--fg2); display: block; margin-bottom: 4px; }
+.tip .r { display: grid; grid-template-columns: 10px 1fr auto; gap: 2px 8px; align-items: baseline; }
+.tip .r i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.tip .v { font: 500 12.5px var(--f-data); font-variant-numeric: tabular-nums; text-align: right; }
+.tip .n { grid-column: 2 / 4; font: 11.5px var(--f-data); color: var(--muted); margin-bottom: 3px; }
+.empty { padding: 40px 16px; text-align: center; color: var(--muted); }
+
+.summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.sum { background: var(--panel); border: 1px solid var(--rule); border-radius: 10px; padding: 14px 16px; display: grid; gap: 8px; min-width: 0; }
+.sum .who { display: flex; align-items: center; gap: 8px; font: 600 17px var(--f-display); }
+.sum .who i { width: 10px; height: 10px; border-radius: 50%; }
+.sum dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; margin: 0; font-size: 14px; }
+.sum dt { color: var(--muted); }
+.sum dd { margin: 0; font-family: var(--f-data); font-size: 13px; font-variant-numeric: tabular-nums; text-align: right; }
+.sum .alts { font-size: 13px; color: var(--muted); }
+.tablewrap { overflow-x: auto; border: 1px solid var(--rule); border-radius: 10px; background: var(--panel); }
+table { border-collapse: collapse; width: 100%; font-size: 13px; font-variant-numeric: tabular-nums; }
+th, td { padding: 6px 10px; border-bottom: 1px solid var(--grid); text-align: right; white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+th { font: 600 12px var(--f-data); color: var(--fg2); position: sticky; top: 0; background: var(--panel); }
+td { font-family: var(--f-data); }
+.notes { color: var(--fg2); font-size: 14.5px; max-width: 75ch; display: grid; gap: 8px; }
+.notes p { margin: 0; }
+.notes code { font: 13px var(--f-data); }
+.status { font: 13px var(--f-data); color: var(--muted); }
+@media (prefers-reduced-motion: no-preference) { .chart path.line { transition: d 0.25s ease; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">French online press · politics section · 2008–2026</div>
+    <h1>Political Portraits</h1>
+    <p class="lede">How the press portrays a person, passage by passage: judged well or badly, framed as radical or moderate, rising or falling in the race.
+      Type a name, compare up to three, and split by year or newspaper.</p>
+  </header>
+
+  <div class="controls" role="group" aria-label="Chart controls">
+    <div class="row">
+      <div class="search field">
+        <span id="q-label">Add a person</span>
+        <input id="q" type="search" autocomplete="off" spellcheck="false" placeholder="e.g. Mélenchon, Bardella, Darmanin…"
+          role="combobox" aria-expanded="false" aria-controls="suggest" aria-labelledby="q-label">
+        <ul id="suggest" class="suggest" role="listbox" hidden></ul>
+      </div>
+      <div class="chips" id="chips" aria-live="polite"></div>
+    </div>
+    <div class="row">
+      <div class="field"><span>Score</span>
+        <div class="seg" id="dim" role="group" aria-label="Score">
+          <button type="button" data-v="valence" aria-pressed="true">Valence</button>
+          <button type="button" data-v="extremisme" aria-pressed="false">Radical framing</button>
+          <button type="button" data-v="dynamique" aria-pressed="false">Momentum</button>
+        </div></div>
+      <div class="field"><span>Time step</span>
+        <div class="seg" id="res" role="group" aria-label="Time step">
+          <button type="button" data-v="year" aria-pressed="true">Year</button>
+          <button type="button" data-v="quarter" aria-pressed="false">Quarter</button>
+          <button type="button" data-v="month" aria-pressed="false">Month</button>
+        </div></div>
+      <div class="field"><span>Hide points under</span>
+        <select id="minn" aria-label="Minimum articles per point">
+          <option value="5">5 articles</option><option value="10" selected>10 articles</option>
+          <option value="30">30 articles</option><option value="100">100 articles</option></select></div>
+      <div class="field" style="flex:1 1 220px"><span>Newspapers</span>
+        <details class="outlets" id="outlets"><summary id="osum">All 32 newspapers</summary><div class="olist" id="olist"></div></details></div>
+    </div>
+    <div class="hint" id="reshint" hidden></div>
+  </div>
+
+  <section class="card" aria-labelledby="t-time">
+    <div class="cardhead"><h2 id="t-time">Over time</h2><div class="sub" id="time-sub"></div></div>
+    <div class="chart" id="time"></div>
+    <details><summary class="sub" style="cursor:pointer">Show the numbers as a table</summary><div class="tablewrap" id="ttable" style="max-height:360px;margin-top:8px"></div></details>
+  </section>
+
+  <section class="card" aria-labelledby="t-out">
+    <div class="cardhead"><h2 id="t-out">By newspaper</h2>
+      <div class="row" style="gap:8px">
+        <label class="sub" for="y0">From</label><select id="y0"></select>
+        <label class="sub" for="y1">to</label><select id="y1"></select></div></div>
+    <div class="sub" id="out-sub"></div>
+    <div class="chart" id="byout"></div>
+  </section>
+
+  <section class="card" aria-labelledby="t-sum">
+    <h2 id="t-sum">Whole period</h2>
+    <div class="summary" id="summary"></div>
+  </section>
+
+  <section class="notes" aria-labelledby="t-notes">
+    <h2 id="t-notes">How the scores are made</h2>
+    <p>1.45 million articles from the politics sections of 32 French news sites (Le Monde is not included). People are found by named-entity recognition and
+      Qwen coreference. Each passage centred on a mention is scored by <code>portrayal-camembert-large</code> v2 (seed 0), trained on codebook v4.</p>
+    <p><b>Valence</b> is P(positive) − P(negative) judgement of the person. <b>Radical framing</b> is P(framed as radical or extreme) − P(framed as moderate).
+      <b>Momentum</b> is P(rising in the race) − P(declining). All three run from −1 to +1. Most passages carry no judgement, so averages sit close to 0.</p>
+    <p>A point averages every scored passage, weighted by the probability that the passage says something about the person. Long portraits weigh more than passing mentions.
+      Shaded bands and whiskers are 95% intervals, with articles as the resampling unit.</p>
+    <p>A name groups every spelling that differs only by case, accents or hyphens. Homonyms are merged, and so is an honorific form such as « Mme Le Pen » with whoever it designates.
+      Only names found in at least 20 articles are listed, with monthly detail for names in 300 articles or more.
+      The mix of newspapers changes over the years. Pick a fixed set of newspapers to compare years on equal terms.</p>
+    <p class="status" id="status">Loading the name index…</p>
+  </section>
+</div>
+
+<script>
+(() => {
+const OUTLET_NAMES = {"20minutes":"20 Minutes","atlantico":"Atlantico","bfmtv":"BFMTV","blast":"Blast","challenges":"Challenges","cnews":"CNews",
+  "francesoir":"FranceSoir","l_opinion":"L'Opinion","la_croix":"La Croix","la_depeche":"La Dépêche","laprovence":"La Provence","latribune":"La Tribune",
+  "le_capital":"Capital","le_courrier_de_l_ouest":"Le Courrier de l'Ouest","le_figaro":"Le Figaro","le_journal_du_dimanche":"Le JDD",
+  "le_maine_libre":"Le Maine Libre","le_nouvel_observateur":"L'Obs","le_telegramme":"Le Télégramme","leparisien":"Le Parisien","les_echos":"Les Échos",
+  "liberation":"Libération","marianne":"Marianne","mediapart":"Mediapart","midilibre":"Midi Libre","nice_matin":"Nice-Matin","ouest_france":"Ouest-France",
+  "paris_match":"Paris Match","paris_normandie":"Paris-Normandie","presse_ocean":"Presse Océan","sud_ouest":"Sud Ouest","valeurs_actuelles":"Valeurs actuelles"};
+const DIMS = {valence: {label: "Valence", neg: "judged negatively", pos: "judged positively"},
+  extremisme: {label: "Radical framing", neg: "framed as moderate", pos: "framed as radical"},
+  dynamique: {label: "Momentum", neg: "declining", pos: "rising"}};
+const SERIES = ["--s1", "--s2", "--s3"];
+const DEFAULT = ["emmanuel macron", "marine le pen", "jean luc melenchon"];
+const $ = id => document.getElementById(id);
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const fmt = x => (x >= 0 ? "+" : "−") + Math.abs(x).toFixed(3);
+const nf = new Intl.NumberFormat("en-GB");
+
+const S = {index: null, byKey: new Map(), outlets: [], sel: [], dim: "valence", res: "year", minn: 10, oset: null, y0: 2008, y1: 2026, cache: new Map()};
+
+const key = s => s.normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+const CRC = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+const crc32 = s => { let c = 0xFFFFFFFF; for (const b of new TextEncoder().encode(s)) c = CRC[(c ^ b) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; };
+
+async function loadName(k) {
+  const b = crc32(k) % S.index.n_buckets, f = `data/b_${String(b).padStart(3, "0")}.json`;
+  if (!S.cache.has(f)) S.cache.set(f, fetch(f).then(r => { if (!r.ok) throw new Error(f); return r.json(); }));
+  return (await S.cache.get(f))[k];
+}
+
+// Merge cells: R = Σ W_i R_i / W ; var = Σ (W_i² se_i² + WW_i (R_i − R)²) / W²  (same as explorer.merged)
+function merge(c, idx, dim) {
+  let W = 0, WR = 0, n = 0;
+  for (const i of idx) { W += c.W[i]; WR += c.W[i] * c[dim][i]; n += c.n_docs[i]; }
+  if (!W) return null;
+  const R = WR / W; let v = 0;
+  for (const i of idx) { const se = c["se_" + dim][i], d = c[dim][i] - R; v += c.W[i] * c.W[i] * se * se + c.WW[i] * d * d; }
+  return {R, se: Math.sqrt(v) / W, n};
+}
+const groupBy = (arr, f) => { const m = new Map(); arr.forEach((x, i) => { const k = f(i); if (k == null) return; (m.get(k) || m.set(k, []).get(k)).push(i); }); return m; };
+
+function yearCells(d) { return d.y.year.map((_, i) => i).filter(i => (!S.oset || S.oset.has(d.y.o[i]))); }
+
+function series(d) {
+  if (S.res === "year" || !d.m) {
+    const idx = yearCells(d), g = groupBy(idx, j => d.y.year[idx[j]]);
+    return [...g].map(([y, js]) => ({t: y + 0.5, label: String(y), ...merge(d.y, js.map(j => idx[j]), S.dim)})).sort((a, b) => a.t - b.t);
+  }
+  const m = d.m, g = groupBy(m.month, i => {
+    const [y, mo] = m.month[i].split("-").map(Number);
+    return S.res === "month" ? m.month[i] : `${y}-Q${Math.floor((mo - 1) / 3) + 1}`;
+  });
+  return [...g].map(([lab, idx]) => {
+    const y = +lab.slice(0, 4), t = S.res === "month" ? y + (+lab.slice(5) - 0.5) / 12 : y + (+lab.slice(6) - 0.5) / 4;
+    return {t, label: lab, ...merge(m, idx, S.dim)};
+  }).sort((a, b) => a.t - b.t);
+}
+
+function niceTicks(lo, hi, n = 5) {
+  const span = hi - lo, step0 = span / n, mag = Math.pow(10, Math.floor(Math.log10(step0))), r = step0 / mag;
+  const step = (r < 1.5 ? 1 : r < 3 ? 2 : r < 7 ? 5 : 10) * mag, out = [];
+  for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) out.push(+v.toFixed(10));
+  return out;
+}
+const el = (tag, attrs = {}, text) => { const e = document.createElementNS("http://www.w3.org/2000/svg", tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (text != null) e.textContent = text; return e; };
+
+function tipAt(box, tip, x, y, html) {
+  tip.innerHTML = html; tip.hidden = false;
+  const bw = box.clientWidth, tw = tip.offsetWidth, th = tip.offsetHeight;
+  tip.style.left = Math.min(Math.max(x + 14, 4), bw - tw - 4) + "px";
+  tip.style.top = Math.max(y - th - 10, 4) + "px";
+}
+
+function drawTime(data) {
+  const box = $("time"); box.innerHTML = "";
+  const ser = data.map(({k, d}) => ({k, pts: series(d).filter(p => p.n >= S.minn)}));
+  const all = ser.flatMap(s => s.pts);
+  if (!all.length) { box.innerHTML = `<div class="empty">No period reaches ${S.minn} articles with these settings.</div>`; $("ttable").innerHTML = ""; return; }
+  const W = Math.max(box.clientWidth - 8, 320), narrow = W < 560, H = narrow ? 300 : 360;
+  const m = {l: 52, r: narrow ? 16 : 128, t: 26, b: 30};
+  let t0 = Math.min(...all.map(p => p.t)), t1 = Math.max(...all.map(p => p.t));
+  t0 = Math.floor(t0); t1 = Math.ceil(t1); if (t1 - t0 < 2) { t0 -= 1; t1 += 1; }
+  let lo = Math.min(0, ...all.map(p => p.R - 1.96 * p.se)), hi = Math.max(0, ...all.map(p => p.R + 1.96 * p.se));
+  const pad = (hi - lo) * 0.08 || 0.01; lo -= pad; hi += pad;
+  const X = t => m.l + (t - t0) / (t1 - t0) * (W - m.l - m.r), Y = v => m.t + (hi - v) / (hi - lo) * (H - m.t - m.b);
+  const svg = el("svg", {viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": `${DIMS[S.dim].label} over time`});
+  const grid = css("--grid"), zero = css("--zero");
+  for (const v of niceTicks(lo, hi)) {
+    svg.append(el("line", {x1: m.l, x2: W - m.r, y1: Y(v), y2: Y(v), stroke: Math.abs(v) < 1e-12 ? zero : grid, "stroke-width": Math.abs(v) < 1e-12 ? 1.25 : 1}));
+    svg.append(el("text", {x: m.l - 8, y: Y(v) + 4, "text-anchor": "end"}, v === 0 ? "0" : (v > 0 ? "+" : "−") + Math.abs(v).toFixed(Math.abs(v) < 0.1 ? 2 : 1)));
+  }
+  svg.append(el("text", {class: "pole", x: m.l, y: 12}, `↑ ${DIMS[S.dim].pos}`));
+  svg.append(el("text", {class: "pole", x: m.l, y: H - 4}, `↓ ${DIMS[S.dim].neg}`));
+  const ystep = (t1 - t0) > 12 ? (narrow ? 4 : 2) : 1;
+  for (let y = t0; y <= t1; y++) if ((y - t0) % ystep === 0 && X(y) < W - m.r + 1) {
+    svg.append(el("line", {x1: X(y), x2: X(y), y1: H - m.b, y2: H - m.b + 4, stroke: zero}));
+    if (y < t1 || (t1 - t0) <= 3) svg.append(el("text", {x: X(y) + (narrow ? 0 : 2), y: H - m.b + 16, "text-anchor": narrow ? "middle" : "start"}, y));
+  }
+  const gap = S.res === "year" ? 1.01 : S.res === "quarter" ? 0.26 : 0.09;
+  const labels = [];
+  ser.forEach((s, si) => {
+    const col = css(SERIES[S.sel.indexOf(s.k)]);
+    const runs = []; let cur = [];
+    s.pts.forEach((p, i) => { if (i && p.t - s.pts[i - 1].t > gap) { runs.push(cur); cur = []; } cur.push(p); }); if (cur.length) runs.push(cur);
+    for (const r of runs) {
+      if (r.length > 1) {
+        const band = r.map(p => `${X(p.t)},${Y(p.R + 1.96 * p.se)}`).join(" L") + " L" + r.slice().reverse().map(p => `${X(p.t)},${Y(p.R - 1.96 * p.se)}`).join(" L");
+        svg.append(el("path", {d: "M" + band + "Z", fill: col, "fill-opacity": 0.14, stroke: "none"}));
+        svg.append(el("path", {class: "line", d: "M" + r.map(p => `${X(p.t)},${Y(p.R)}`).join(" L"), fill: "none", stroke: col, "stroke-width": 2, "stroke-linejoin": "round"}));
+      } else {
+        const p = r[0];
+        svg.append(el("line", {x1: X(p.t), x2: X(p.t), y1: Y(p.R + 1.96 * p.se), y2: Y(p.R - 1.96 * p.se), stroke: col, "stroke-width": 2, "stroke-opacity": 0.45}));
+      }
+      if (S.res === "year" || r.length === 1) r.forEach(p => svg.append(el("circle", {cx: X(p.t), cy: Y(p.R), r: 3.5, fill: col, stroke: css("--panel"), "stroke-width": 2})));
+    }
+    const last = s.pts[s.pts.length - 1];
+    if (!narrow && last) labels.push({y: Y(last.R), x: X(last.t), text: displayName(s.k), col});
+  });
+  labels.sort((a, b) => a.y - b.y);
+  for (let i = 1; i < labels.length; i++) if (labels[i].y - labels[i - 1].y < 16) labels[i].y = labels[i - 1].y + 16;
+  for (const l of labels) {
+    svg.append(el("circle", {cx: W - m.r + 12, cy: l.y - 4, r: 4, fill: l.col}));
+    svg.append(el("text", {class: "lab", x: W - m.r + 20, y: l.y}, trunc(l.text, 16)));
+  }
+  const cross = el("line", {y1: m.t, y2: H - m.b, stroke: zero, "stroke-dasharray": "3 3", visibility: "hidden"});
+  svg.append(cross);
+  const hit = el("rect", {x: m.l, y: m.t, width: W - m.l - m.r, height: H - m.t - m.b, fill: "transparent"});
+  svg.append(hit); box.append(svg);
+  const tip = document.createElement("div"); tip.className = "tip"; tip.hidden = true; box.append(tip);
+  const times = [...new Set(all.map(p => p.t))].sort((a, b) => a - b);
+  const move = ev => {
+    const r = svg.getBoundingClientRect(), sx = (ev.clientX - r.left) * W / r.width;
+    const t = t0 + (sx - m.l) / (W - m.l - m.r) * (t1 - t0);
+    let best = times[0]; for (const u of times) if (Math.abs(u - t) < Math.abs(best - t)) best = u;
+    cross.setAttribute("x1", X(best)); cross.setAttribute("x2", X(best)); cross.setAttribute("visibility", "visible");
+    const rows = ser.map(s => ({k: s.k, p: s.pts.find(p => p.t === best)})).filter(x => x.p);
+    const lab = rows[0]?.p.label ?? "";
+    tipAt(box, tip, X(best) * r.width / W, ev.clientY - box.getBoundingClientRect().top,
+      `<b>${lab}</b>` + rows.map(({k, p}) => `<div class="r"><i style="background:var(${SERIES[S.sel.indexOf(k)]})"></i><span>${esc(displayName(k))}</span><span class="v">${fmt(p.R)} ± ${(1.96 * p.se).toFixed(3)}</span><span class="n">${nf.format(p.n)} articles</span></div>`).join(""));
+  };
+  hit.addEventListener("pointermove", move); hit.addEventListener("pointerdown", move);
+  hit.addEventListener("pointerleave", () => { tip.hidden = true; cross.setAttribute("visibility", "hidden"); });
+  // table
+  const labs = [...new Map(all.map(p => [p.t, p.label]))].sort((a, b) => a[0] - b[0]);
+  $("ttable").innerHTML = `<table><thead><tr><th>Period</th>${ser.map(s => `<th>${esc(displayName(s.k))}</th><th>±95%</th><th>articles</th>`).join("")}</tr></thead><tbody>` +
+    labs.map(([t, l]) => `<tr><td>${l}</td>${ser.map(s => { const p = s.pts.find(p => p.t === t); return p ? `<td>${fmt(p.R)}</td><td>${(1.96 * p.se).toFixed(3)}</td><td>${nf.format(p.n)}</td>` : "<td></td><td></td><td></td>"; }).join("")}</tr>`).join("") + "</tbody></table>";
+}
+
+function drawOutlets(data) {
+  const box = $("byout"); box.innerHTML = "";
+  const per = data.map(({k, d}) => {
+    const idx = d.y.year.map((_, i) => i).filter(i => d.y.year[i] >= S.y0 && d.y.year[i] <= S.y1 && (!S.oset || S.oset.has(d.y.o[i])));
+    const g = groupBy(idx, j => d.y.o[idx[j]]), out = new Map();
+    for (const [o, js] of g) { const r = merge(d.y, js.map(j => idx[j]), S.dim); if (r && r.n >= S.minn) out.set(o, r); }
+    return {k, out};
+  });
+  const os = [...new Set(per.flatMap(p => [...p.out.keys()]))];
+  if (!os.length) { box.innerHTML = `<div class="empty">No newspaper reaches ${S.minn} articles for this period.</div>`; return; }
+  const first = per.find(p => p.out.size) || per[0];
+  os.sort((a, b) => (first.out.get(b)?.R ?? -9) - (first.out.get(a)?.R ?? -9));
+  const W = Math.max(box.clientWidth - 8, 320), narrow = W < 560, rowH = 26, m = {l: narrow ? 118 : 170, r: 18, t: 30, b: 24};
+  const H = m.t + m.b + os.length * rowH;
+  const vals = per.flatMap(p => [...p.out.values()]);
+  let lo = Math.min(0, ...vals.map(r => r.R - 1.96 * r.se)), hi = Math.max(0, ...vals.map(r => r.R + 1.96 * r.se));
+  const pad = (hi - lo) * 0.06 || 0.01; lo -= pad; hi += pad;
+  const X = v => m.l + (v - lo) / (hi - lo) * (W - m.l - m.r);
+  const svg = el("svg", {viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": `${DIMS[S.dim].label} by newspaper`});
+  const grid = css("--grid"), zero = css("--zero");
+  for (const v of niceTicks(lo, hi, narrow ? 4 : 6)) {
+    svg.append(el("line", {x1: X(v), x2: X(v), y1: m.t - 6, y2: H - m.b, stroke: Math.abs(v) < 1e-12 ? zero : grid, "stroke-width": Math.abs(v) < 1e-12 ? 1.25 : 1}));
+    svg.append(el("text", {x: X(v), y: H - m.b + 15, "text-anchor": "middle"}, v === 0 ? "0" : (v > 0 ? "+" : "−") + Math.abs(v).toFixed(Math.abs(v) < 0.1 ? 2 : 1)));
+  }
+  svg.append(el("text", {class: "pole", x: m.l, y: 14}, `← ${DIMS[S.dim].neg}`));
+  svg.append(el("text", {class: "pole", x: W - m.r, y: 14, "text-anchor": "end"}, `${DIMS[S.dim].pos} →`));
+  const off = per.length === 1 ? [0] : per.length === 2 ? [-4, 4] : [-6, 0, 6];
+  const tip = document.createElement("div"); tip.className = "tip"; tip.hidden = true;
+  os.forEach((o, i) => {
+    const y = m.t + i * rowH + rowH / 2;
+    if (i % 2 === 0) svg.append(el("rect", {x: 0, y: y - rowH / 2, width: W, height: rowH, fill: grid, "fill-opacity": 0.45}));
+    svg.append(el("text", {class: "olab", x: m.l - 10, y: y + 4, "text-anchor": "end"}, trunc(OUTLET_NAMES[S.outlets[o]] || S.outlets[o], narrow ? 14 : 22)));
+    per.forEach((p, pi) => {
+      const r = p.out.get(o); if (!r) return;
+      const col = css(SERIES[S.sel.indexOf(p.k)]), yy = y + off[pi];
+      svg.append(el("line", {x1: X(r.R - 1.96 * r.se), x2: X(r.R + 1.96 * r.se), y1: yy, y2: yy, stroke: col, "stroke-width": 2, "stroke-opacity": 0.5, "stroke-linecap": "round"}));
+      svg.append(el("circle", {cx: X(r.R), cy: yy, r: 4.5, fill: col, stroke: css("--panel"), "stroke-width": 2}));
+    });
+    const hit = el("rect", {x: 0, y: y - rowH / 2, width: W, height: rowH, fill: "transparent"});
+    const show = ev => {
+      const rows = per.map(p => ({k: p.k, r: p.out.get(o)})).filter(x => x.r);
+      const br = box.getBoundingClientRect();
+      tipAt(box, tip, ev.clientX - br.left, ev.clientY - br.top,
+        `<b>${esc(OUTLET_NAMES[S.outlets[o]] || S.outlets[o])} · ${S.y0}–${S.y1}</b>` + rows.map(({k, r}) => `<div class="r"><i style="background:var(${SERIES[S.sel.indexOf(k)]})"></i><span>${esc(displayName(k))}</span><span class="v">${fmt(r.R)} ± ${(1.96 * r.se).toFixed(3)}</span><span class="n">${nf.format(r.n)} articles</span></div>`).join(""));
+    };
+    hit.addEventListener("pointermove", show); hit.addEventListener("pointerdown", show);
+    hit.addEventListener("pointerleave", () => { tip.hidden = true; });
+    svg.append(hit);
+  });
+  box.append(svg, tip);
+  $("out-sub").textContent = `Sorted by ${displayName(first.k)}. Newspapers with fewer than ${S.minn} articles on a person in ${S.y0}–${S.y1} are left out for that person.`;
+}
+
+function drawSummary(data) {
+  $("summary").innerHTML = data.map(({k, d}) => {
+    const idx = yearCells(d), e = S.index.names[S.byKey.get(k)];
+    const rows = Object.keys(DIMS).map(dm => { const r = merge(d.y, idx, dm); return `<dt>${DIMS[dm].label}</dt><dd>${r ? fmt(r.R) + " ± " + (1.96 * r.se).toFixed(3) : "–"}</dd>`; }).join("");
+    const n = idx.reduce((a, i) => a + d.y.n_docs[i], 0);
+    return `<div class="sum"><div class="who"><i style="background:var(${SERIES[S.sel.indexOf(k)]})"></i>${esc(e[1])}</div>
+      <dl><dt>Articles</dt><dd>${nf.format(n)}</dd>${rows}</dl>
+      ${e[4].length ? `<div class="alts">Also spelled ${e[4].map(a => "« " + esc(a.replace(/ /g, " ")) + " »").join(", ")}</div>` : ""}</div>`;
+  }).join("") || `<div class="empty">Add a person to see their scores.</div>`;
+}
+
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+const trunc = (s, n) => s.length > n ? s.slice(0, n - 1) + "…" : s;
+const displayName = k => S.index.names[S.byKey.get(k)][1];
+
+let token = 0;
+async function render() {
+  if (!S.index) return;
+  const my = ++token;
+  renderChips();
+  const data = (await Promise.all(S.sel.map(async k => ({k, d: await loadName(k)})))).filter(x => x.d);
+  if (my !== token) return;
+  const monthlyOk = data.length && data.every(x => x.d.m) && !S.oset;
+  document.querySelectorAll("#res button").forEach(b => { if (b.dataset.v !== "year") b.disabled = !monthlyOk; });
+  if (!monthlyOk && S.res !== "year") setSeg("res", S.res = "year");
+  const hint = $("reshint");
+  if (data.length && !monthlyOk) {
+    hint.hidden = false;
+    hint.textContent = S.oset ? "Quarterly and monthly steps cover all newspapers together; clear the newspaper filter to use them."
+      : "Quarterly and monthly steps need every selected person to appear in at least 300 articles.";
+  } else hint.hidden = true;
+  $("time-sub").textContent = data.length ? `${DIMS[S.dim].label}, ${S.res === "year" ? "yearly" : S.res === "quarter" ? "quarterly" : "monthly"} means with 95% intervals${S.oset ? `, ${S.oset.size} newspapers` : ""}` : "";
+  if (!data.length) { $("time").innerHTML = `<div class="empty">Add a person to see their scores.</div>`; $("byout").innerHTML = ""; $("ttable").innerHTML = ""; $("summary").innerHTML = ""; $("out-sub").textContent = ""; return; }
+  drawTime(data); drawOutlets(data); drawSummary(data);
+}
+
+function renderChips() {
+  $("chips").innerHTML = S.sel.map((k, i) => { const e = S.index.names[S.byKey.get(k)];
+    return `<span class="chip"><i style="background:var(${SERIES[i]})"></i>${esc(e[1])} <small>${nf.format(e[2])}</small><button type="button" data-k="${esc(k)}" aria-label="Remove ${esc(e[1])}">×</button></span>`; }).join("");
+  $("q").disabled = S.sel.length >= 3;
+  $("q").placeholder = S.sel.length >= 3 ? "Remove a person to add another" : "e.g. Mélenchon, Bardella, Darmanin…";
+}
+$("chips").addEventListener("click", e => { const b = e.target.closest("button[data-k]"); if (!b) return; S.sel = S.sel.filter(k => k !== b.dataset.k); render(); });
+
+// search
+let sugg = [], active = -1;
+function search(q) {
+  const k = key(q); if (!k) return [];
+  const toks = k.split(" "), out = [];
+  for (const e of S.index.names) {
+    if (S.sel.includes(e[0])) continue;
+    const words = e[0].split(" ");
+    if (!toks.every(t => words.some(w => w.startsWith(t)))) continue;
+    out.push(e); if (out.length >= 10) break;
+  }
+  return out;
+}
+function showSugg() {
+  const ul = $("suggest"), q = $("q");
+  if (!sugg.length) { ul.hidden = true; q.setAttribute("aria-expanded", "false"); if (q.value.trim()) { ul.innerHTML = `<li aria-disabled="true"><span class="alt">No name in 20+ articles matches</span></li>`; ul.hidden = false; } return; }
+  ul.innerHTML = sugg.map((e, i) => `<li role="option" id="opt${i}" aria-selected="${i === active}" data-k="${esc(e[0])}"><span>${esc(e[1])}${e[4].length ? ` <span class="alt">· ${esc(e[4][0].replace(/ /g, " "))}</span>` : ""}</span><span class="n">${nf.format(e[2])} art.</span></li>`).join("");
+  ul.hidden = false; q.setAttribute("aria-expanded", "true");
+  if (active >= 0) q.setAttribute("aria-activedescendant", "opt" + active); else q.removeAttribute("aria-activedescendant");
+}
+function pick(k) { if (!k || S.sel.includes(k) || S.sel.length >= 3) return; S.sel.push(k); $("q").value = ""; sugg = []; active = -1; showSugg(); render(); }
+$("q").addEventListener("input", e => { sugg = search(e.target.value); active = sugg.length ? 0 : -1; showSugg(); });
+$("q").addEventListener("keydown", e => {
+  if (e.key === "ArrowDown") { active = Math.min(active + 1, sugg.length - 1); showSugg(); e.preventDefault(); }
+  else if (e.key === "ArrowUp") { active = Math.max(active - 1, 0); showSugg(); e.preventDefault(); }
+  else if (e.key === "Enter") { if (sugg[active]) pick(sugg[active][0]); e.preventDefault(); }
+  else if (e.key === "Escape") { sugg = []; showSugg(); }
+});
+$("suggest").addEventListener("pointerdown", e => { const li = e.target.closest("li[data-k]"); if (li) { e.preventDefault(); pick(li.dataset.k); } });
+$("q").addEventListener("blur", () => setTimeout(() => { $("suggest").hidden = true; $("q").setAttribute("aria-expanded", "false"); }, 120));
+
+function setSeg(id, v) { document.querySelectorAll(`#${id} button`).forEach(b => b.setAttribute("aria-pressed", String(b.dataset.v === v))); }
+$("dim").addEventListener("click", e => { const b = e.target.closest("button"); if (!b) return; S.dim = b.dataset.v; setSeg("dim", S.dim); render(); });
+$("res").addEventListener("click", e => { const b = e.target.closest("button"); if (!b || b.disabled) return; S.res = b.dataset.v; setSeg("res", S.res); render(); });
+$("minn").addEventListener("change", e => { S.minn = +e.target.value; render(); });
+for (const id of ["y0", "y1"]) $(id).addEventListener("change", () => {
+  S.y0 = +$("y0").value; S.y1 = +$("y1").value; if (S.y0 > S.y1) { [S.y0, S.y1] = [S.y1, S.y0]; $("y0").value = S.y0; $("y1").value = S.y1; } render(); });
+
+function outletUI() {
+  const order = S.outlets.map((o, i) => i).sort((a, b) => (OUTLET_NAMES[S.outlets[a]] || "").localeCompare(OUTLET_NAMES[S.outlets[b]] || "", "fr"));
+  $("olist").innerHTML = `<div class="tools"><button type="button" class="linkbtn" data-a="all">Select all</button><button type="button" class="linkbtn" data-a="none">Clear</button></div>` +
+    order.map(i => `<label><input type="checkbox" id="o_${S.outlets[i]}" value="${i}" checked> ${esc(OUTLET_NAMES[S.outlets[i]] || S.outlets[i])}</label>`).join("");
+  const sync = () => {
+    const on = [...$("olist").querySelectorAll("input:checked")].map(x => +x.value);
+    S.oset = on.length === S.outlets.length || !on.length ? null : new Set(on);
+    $("osum").textContent = S.oset ? `${on.length} of ${S.outlets.length} newspapers` : `All ${S.outlets.length} newspapers`;
+    render();
+  };
+  $("olist").addEventListener("change", sync);
+  $("olist").addEventListener("click", e => { const b = e.target.closest("button[data-a]"); if (!b) return;
+    $("olist").querySelectorAll("input").forEach(x => x.checked = b.dataset.a === "all"); sync(); });
+}
+
+let rz; window.addEventListener("resize", () => { clearTimeout(rz); rz = setTimeout(render, 150); });
+const mq = matchMedia("(prefers-color-scheme: dark)"); mq.addEventListener?.("change", render);
+new MutationObserver(render).observe(document.documentElement, {attributes: true, attributeFilter: ["data-theme"]});
+
+fetch("index.json").then(r => { if (!r.ok) throw new Error("index.json " + r.status); return r.json(); }).then(ix => {
+  S.index = ix; S.outlets = ix.outlets; ix.names.forEach((e, i) => S.byKey.set(e[0], i));
+  for (let y = 2008; y <= 2026; y++) for (const id of ["y0", "y1"]) $(id).append(new Option(y, y));
+  $("y0").value = S.y0; $("y1").value = S.y1;
+  outletUI();
+  S.sel = DEFAULT.filter(k => S.byKey.has(k));
+  $("status").textContent = `${nf.format(ix.names.length)} names indexed.`;
+  render();
+}).catch(err => { $("status").textContent = "The name index could not be loaded (" + err.message + "). Reload the page to try again."; $("time").innerHTML = `<div class="empty">The data could not be loaded. Reload the page to try again.</div>`; });
+})();
+</script>
