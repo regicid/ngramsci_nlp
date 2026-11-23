@@ -1,0 +1,20 @@
+# La Croix, Le Parisien, Les Échos, Mediapart, Paris Match, Télérama and Valeurs Actuelles: every article of the scrape
+# (saclay CSVs of 23 Nov 2026) except those already in the politique corpus (253,001 articles of these outlets, all found
+# and skipped; Télérama has none), 3,450,058 articles in 693 shards of <= 5,000: la_croix 377,785 = shards 0-75,
+# leparisien 1,198,550 = 76-315, les_echos 1,119,819 = 316-539, mediapart 271,861 = 540-594, paris_match 266,790 = 595-648,
+# telerama 131,472 = 649-675, valeurs_actuelles 83,781 = 676-692 (saclay /data/qcoref_presse4/shards/shards.tsv;
+# extractor /data/qcoref_presse4/extract_full.py). politique + presse4 = the whole of the seven outlets.
+name: presse4
+n_shards: 693
+hub_repo: regicid/qcoref-presse4-work          # private board
+source: {host: saclay, dir: /data/qcoref_presse4/shards, pattern: "shard_{k:05d}.jsonl.gz"}
+ttl_hours: {parse_ner: 3, qwen: 6}
+params:
+  parse_ner: {k: 10}
+  qwen: {single_process: true}
+  quotes: {compute_type: float16, split: chunks}
+  # every singular person chain, name-free input (naming = post-processing), as decided on 2026-11-23
+  portrayal: {seeds: [0], exclude_possessive: true, revision: 678e23cc21ff9026f5a183ef7905ee5a0ac119d3,
+              surnames_file: data/surnames.json, score_all: true}
+layout:
+  portrayal: portrayal_all/shard_{k:05d}.parquet

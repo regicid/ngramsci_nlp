@@ -7,7 +7,8 @@ written alongside as full_name / name_source and recomputable at release time wi
 Default: seeds 0 and 1 (gold kappa equal to the 5-seed ensemble, 2.5x cheaper; 1 seed loses 0.015-0.045).
 With `targets` (names) or `targets_file` (one name per line) in the corpus params, only those people are scored: chains
 with a proper-name mention matching the name, in articles naming them in full. Without, every person.
-Output: one row per (article, chain, mention sentence) with the head probabilities and segment flags. The passages
+Output: one row per (article, chain, mention sentence) with the head probabilities, segment flags, sent (the centre
+sentence, 0 = title) and mentions (the chain mentions the passage scores, [start_token, end_token]; from 2026-11-23 on). The passages
 themselves are article text and are not written. Trained on politicians: see the model card for the heads that
 transfer to other people."""
 import collections
@@ -298,6 +299,8 @@ def run(k, inp, out, state, ctx):
         if d not in docs.index:
             continue
         text = docs.at[d, "text"]
+        tok = {(int(a), int(b)): [int(x), int(y)] for a, b, x, y in zip(g["onset"], g["offset"], g["start_token"], g["end_token"])} \
+            if "start_token" in g else {}
         year = str(docs.at[d, "date"])[:4] if "date" in docs.columns else None
         y = int(year) if year and year.isdigit() else None
         sn = getattr(state, "surnames", None)
@@ -314,7 +317,8 @@ def run(k, inp, out, state, ctx):
                 for s in build(text, rx, spans):
                     rows.append({"title": s["title"], "passage": s["passage"], "pattern": rx.pattern})
                     meta.append({"doc_id": d, "chain": ch, "full_name": name, "name_source": src, "n_mentions": len(spans),
-                                 **{x: s[x] for x in ("mention", "is_title", "kind", "label_flag", "in_quote")}})
+                                 **{x: s[x] for x in ("mention", "is_title", "kind", "label_flag", "in_quote", "sent")},
+                                 "mentions": [tok[x] for x in s["spans"] if x in tok]})
             continue
         found = targeted(text, g, targets) if targets else people(
             text, g, ctx.p("portrayal", "min_mentions", 1), surnames=sn, year=y,
@@ -323,7 +327,8 @@ def run(k, inp, out, state, ctx):
             for s in build(text, name_re(name), spans):
                 rows.append({"title": s["title"], "passage": s["passage"], "full_name": name})
                 meta.append({"doc_id": d, "chain": ch, "full_name": name, "n_mentions": len(spans),
-                             **{x: s[x] for x in ("mention", "is_title", "kind", "label_flag", "in_quote")}})
+                             **{x: s[x] for x in ("mention", "is_title", "kind", "label_flag", "in_quote", "sent")},
+                             "mentions": [tok[x] for x in s["spans"] if x in tok]})
     P = state.score(rows, batch=ctx.p("portrayal", "batch", 64)) if rows else []
     df = pd.DataFrame(meta)
     for h in ("pertinent", "journaliste"):

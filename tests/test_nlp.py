@@ -227,3 +227,37 @@ def test_quote_links():
     assert r[1]["mention"] == "Il" and r[1]["chain_name"] == "Paul Martin" and r[1]["chain_gender"] == "Male"
     assert r[2]["q_start"] == -1 and r[2]["mention"] == "Paul Martin" and r[2]["chain"] == 1   # quote lost, speaker found
     assert r[3]["link"] == "" and r[3]["mention"] is None and r[3]["chain"] is None
+
+
+def test_locate_rebuilds_sentences_and_mentions():
+    """release.locate gives each passage its centre sentence and the chain mentions it scores, the same as the scorer
+    writes from 2026-11-23 on; a possessive-only sentence (excluded upstream) has no passage."""
+    import types
+    import ngramsci.stages.portrayal as P
+    from ngramsci import release as Rl
+    text = "Réunion///Paul Martin arrive. Il parle, puis il repart. La foule crie. Martin sourit."
+    ents = _ents(text, [(0, "Paul Martin", "PROP", "Singular"), (0, "Il", "PRON", "Singular"), (0, "il", "PRON", "Singular"),
+                        (0, "Martin", "PROP", "Singular")])
+    ents = ents.assign(doc_id="d", start_token=range(0, 4 * len(ents), 4), end_token=range(1, 4 * len(ents), 4))
+    score = lambda rows, batch=64: [{"pertinent": 1.0, "journaliste": 0.0, "valence": [0, 1, 0], "extremisme": [0, 1, 0], "dynamique": [0, 1, 0]}] * len(rows)
+    docs = pd.DataFrame({"doc_id": ["d"], "text": [text], "date": ["2020-01-01"]}).set_index("doc_id")
+    orig = P.load_inputs
+    P.load_inputs = lambda *a, **k: (docs, ents)
+    try:
+        import tempfile, os
+        out = os.path.join(tempfile.mkdtemp(), "p.parquet")
+        P.run(0, {"text": "", "mentions": "", "entities": ""}, {"portrayal": out}, types.SimpleNamespace(score=score, revision="stub"),
+              types.SimpleNamespace(p=lambda st, key, d=None: d))
+        df = pd.read_parquet(out)
+    finally:
+        P.load_inputs = orig
+    assert list(df["sent"]) == [1, 2, 4]                       # sentence 3 (« La foule crie ») does not mention him
+    assert [len(m) for m in df["mentions"]] == [1, 2, 1]        # « Il … il » share one passage
+    again = Rl.locate(df.drop(columns=["sent", "mentions"]), docs, ents, mode="name")
+    assert Rl.locate.mismatch == 0 and list(again["sent"]) == list(df["sent"])
+    assert [sorted(map(list, m)) for m in again["mentions"]] == [sorted(map(list, m)) for m in df["mentions"]]
+    e = Rl.entities(ents, pd.Series({"d": "2020-01-01"}), port=again)
+    assert e["p_pertinent"].notna().all() and len(e) == len(ents)
+    assert list(e["portrayal_sent"]) == [1, 2, 2, 4]           # « Il … il »: one passage, two mention rows
+    c = Rl.per_character(again, passages=False)
+    assert "portrayal" not in c and int(c["portrayal_n"].iloc[0]) == 3

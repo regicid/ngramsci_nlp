@@ -69,9 +69,22 @@ def marked(text, a, b, spans):
     return "".join(s).strip()
 
 
+def in_target(a, spans, limit=700):
+    """The spans (sorted) whose closing ]] falls within the first `limit` characters of marked(text, a, b, spans), i.e.
+    those the scored target really marks (marked() strips leading whitespace: ignored, sentences start clean)."""
+    out, cur, n = [], a, 0
+    for x, y in sorted(spans):
+        n += (x - cur) + 4 + (y - x); cur = y
+        if n <= limit:
+            out.append((x, y))
+    return out
+
+
 def build(text, rx, chain_spans):
     """Segments for one person in one article. rx: the person's name regex; chain_spans: (onset, offset) of all the
-    mentions of their coreference chain. Returns dicts: mention (index), is_title, title, passage, kind, label_flag, in_quote."""
+    mentions of their coreference chain. Returns dicts: mention (index), is_title, title, passage, kind, label_flag, in_quote,
+    sent (index of the centre sentence; 0 = title) and spans (the chain mentions the target marks: chain spans that
+    overlap a marked span; name-regex matches outside the chain are not in it)."""
     S = sentences(text); clean = [text[a:b].strip() for a, b in S]
     per_sent = {}
     for j, (a, b) in enumerate(S):
@@ -110,6 +123,10 @@ def build(text, rx, chain_spans):
                 seg = [NOTE] + seg
         passage = " ".join(seg)
         near = any(abs(m.start() - n.start()) < 80 for n in re.finditer(r"\[\[", passage) for m in LABEL.finditer(passage))
+        shown = in_target(a, per_sent[i])
+        # a chain mention belongs to the passage of the sentence it starts in (one glued across the title///body
+        # separator overlaps name matches on both sides)
+        own = [(x, y) for x, y in chain_spans if a <= x < b and any(x < q and y > p for p, q in shown)]
         out.append(dict(mention=j, is_title=int(i == 0), title=ttl, passage=passage, kind="+".join(sorted(kinds)),
-                        label_flag=int(near), in_quote=int(passage.startswith(NOTE))))
+                        label_flag=int(near), in_quote=int(passage.startswith(NOTE)), sent=i, spans=sorted(own)))
     return out
