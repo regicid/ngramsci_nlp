@@ -2,7 +2,7 @@
   python explorer/build_site.py cells          -> <W>/explorer/cells.parquet, names.parquet (8 processes)
   python explorer/build_site.py sizes          -> page sizes for a few thresholds
   python explorer/build_site.py site MIN MONTHLY -> <W>/explorer/site/ (index.json, data/, ranking.json)"""
-import glob, json, os, sys
+import functools, glob, json, os, sys
 import multiprocessing as mp
 import pandas as pd
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
@@ -11,8 +11,18 @@ W = "/sps/humanum/home/bdecourson/ngramsci_work"; OUT = f"{W}/explorer"
 COLS = ["doc_id", "date", "newspaper", "full_name", "portrayal_n", "portrayal_pertinent",
         "portrayal_valence", "portrayal_extremisme", "portrayal_dynamique", "portrayal_journaliste"]
 
+RUB = f"{W}/lemonde_rub/rubriques.parquet"   # explorer/lemonde_rubriques.py final
+
+@functools.lru_cache(1)
+def politique_ids():
+    r = pd.read_parquet(RUB, columns=["doc_id", "rubrique"])
+    return set(r.loc[r.rubrique == "politique", "doc_id"])
+
 def one(f):
-    return E.cells_from_characters(pd.read_parquet(f, columns=COLS))
+    ch = pd.read_parquet(f, columns=COLS)
+    if "/lemonde/" in f and os.path.exists(RUB):   # Le Monde split: « politique » section vs every other section
+        ch["newspaper"] = ch["doc_id"].isin(politique_ids()).map({True: "lemonde_politique", False: "lemonde_autres"})
+    return E.cells_from_characters(ch)
 
 def cells():
     fs = sorted(glob.glob(f"{W}/release/data/characters_qwen4b/politique/*.parquet") +
