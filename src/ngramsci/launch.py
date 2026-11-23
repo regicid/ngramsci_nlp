@@ -113,7 +113,7 @@ def queue(site) -> list[str]:
 
 def status(corpus, sites, board, stage_names=None):
     S.load_all()
-    names = stage_names or [n for n in ("rubriques", "parse_ner", "qwen", "assemble", "quotes", "portrayal") if n in S.REGISTRY]
+    names = stage_names or [n for n in ("rubriques", "parse_ner", "qwen", "assemble", "quotes", "quote_links", "portrayal") if n in S.REGISTRY]
     print(f"{corpus.name}: {corpus.n_shards} shards  ({time.strftime('%H:%M')})")
     for n in names:
         st = S.get(n); o = st.done_output

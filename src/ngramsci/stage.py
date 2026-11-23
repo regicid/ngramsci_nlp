@@ -97,7 +97,7 @@ TEXT = Output("text", "text/shard_{k:05d}.jsonl.gz", private=True)
 
 def load_all():
     """Import the built-in stages (they register themselves). Imports are light: models load in Stage.load."""
-    from .stages import rubriques, parse_ner, parse, qwen, assemble, quotes, portrayal  # noqa: F401
+    from .stages import rubriques, parse_ner, parse, qwen, assemble, quotes, quote_links, portrayal  # noqa: F401
 
 
 def get(name: str) -> Stage:

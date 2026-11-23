@@ -196,3 +196,34 @@ def test_score_all_name_free():
     assert df[df.chain == 0].full_name.isna().all() and (df[df.chain == 1].full_name == "Paul Martin").all()
     assert all("pattern" in r and "full_name" not in r for r in seen)
     assert re.compile(seen[-1]["pattern"]).search("Paul Martin") and not re.compile(next(r for r in seen if "ministre" in r["passage"])["pattern"]).search("Le ministre")
+
+
+def _quote_case():
+    text = ("Titre///Claire Dubois arrive à Lyon. « Le budget est   prêt », a-t-elle déclaré. "
+            "Paul Martin l’approuve. Il estime que « la ville peut investir ».")
+    spans = {"Claire Dubois": text.find("Claire"), "elle": text.find("elle"), "Paul Martin": text.find("Paul"),
+             "Il": text.find("Il "), "Lyon": text.find("Lyon")}
+    ents = pd.DataFrame([dict(onset=a, offset=a + len(t), text=t, cat="LOC" if t == "Lyon" else "PER",
+                              prop="PROP" if t[0].isupper() and t != "Il" else "PRON",
+                              COREF={"Claire Dubois": 0, "elle": 0, "Paul Martin": 1, "Il": 1}.get(t))
+                         for t, a in spans.items()]).sort_values("onset").reset_index(drop=True)
+    chars = pd.DataFrame([dict(char_id=0, number="Singular", gender_firm="Female", gender_score=0.0, gender_conflict=False),
+                          dict(char_id=1, number="Singular", gender_firm="Male", gender_score=1.0, gender_conflict=False)])
+    quotes = pd.DataFrame([dict(unit=0, content="Le budget est prêt", source="elle"),
+                           dict(unit=0, content="la ville peut investir", source="il"),       # case differs from the text
+                           dict(unit=0, content="introuvable", source="Paul Martin"),
+                           dict(unit=0, content="la ville peut investir", source="Jacques")])
+    return text, quotes, ents, chars
+
+
+def test_quote_links():
+    from ngramsci.stages.quote_links import link_doc, norm
+    assert norm("L’ assemblée\n\n a dit")[0] == "l'assemblée a dit"
+    text, quotes, ents, chars = _quote_case()
+    r = link_doc(text, quotes, ents, chars)
+    assert text[r[0]["q_start"]:r[0]["q_end"]] == "Le budget est   prêt"
+    assert r[0]["mention"] == "elle" and r[0]["chain"] == 0 and r[0]["chain_gender"] == "Female"
+    assert r[0]["chain_name"] == "Claire Dubois" and r[0]["chain_size"] == 2 and r[0]["link"] == "unit"
+    assert r[1]["mention"] == "Il" and r[1]["chain_name"] == "Paul Martin" and r[1]["chain_gender"] == "Male"
+    assert r[2]["q_start"] == -1 and r[2]["mention"] == "Paul Martin" and r[2]["chain"] == 1   # quote lost, speaker found
+    assert r[3]["link"] == "" and r[3]["mention"] is None and r[3]["chain"] is None

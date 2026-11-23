@@ -88,7 +88,7 @@ def cmd_publish(a):
     from .store import DiskStore, HubStore
     corpus = C.load_corpus(a.corpus); disk = DiskStore(a.root, corpus.layout)
     hub = HubStore(corpus.hub_repo, os.path.join(a.root, ".outbox"), corpus.layout); api = HfApi()
-    stages = [S.get(n) for n in (a.stages.split(",") if a.stages else ["parse_ner", "qwen", "assemble", "quotes", "rubriques", "portrayal"])]
+    stages = [S.get(n) for n in (a.stages.split(",") if a.stages else ["parse_ner", "qwen", "assemble", "quotes", "quote_links", "rubriques", "portrayal"])]
     while True:
         pending = []
         for st in stages:
