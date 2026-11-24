@@ -175,7 +175,8 @@ def test_lula_mononyms_and_first_name_guard(tmp_path):
                            (2022, "Edouard Philippe", "full", 300), (2022, "Philippe Martinez", "full", 60),
                            (2022, "Silva", "bare", 30), (2022, "Marina Silva", "full", 25),
                            (2022, "Carrefour", "bare", 40), (2022, "Carrefour", "other", 300),
-                           (2022, "Hitler", "bare", 200), (2022, "Adolf Hitler", "full", 8)],
+                           (2022, "Hitler", "bare", 200), (2022, "Adolf Hitler", "full", 8), (2022, "Adolf Martin", "full", 30),
+                           (2022, "RFI", "bare", 50), (2022, "Neymar", "bare", 80), (2022, "Agent Neymar", "full", 4)],
                           columns=["year", "full_name", "kind", "n"])
     al = {"lula da silva": "Luiz Inácio Lula da Silva", "lula": "Luiz Inácio Lula da Silva",
           "luiz inacio lula da silva": "Luiz Inácio Lula da Silva"}
@@ -183,6 +184,7 @@ def test_lula_mononyms_and_first_name_guard(tmp_path):
     assert sn.get("lula", 2022) == "Luiz Inácio Lula da Silva" and sn.get("zapatero", 2022) == "José Luis Rodríguez Zapatero"
     assert sn.get("madonna", 2022) == "Madonna" and sn.get("dieu", 2022) is None
     assert sn.get("carrefour", 2022) is None and sn.get("hitler", 2022) == "Adolf Hitler"
+    assert sn.get("rfi", 2022) is None and sn.get("neymar", 2022) == "Neymar"
     assert sn.get("luis", 2022) is None and sn.get("philippe", 2022) is None and sn.get("silva", 2022) is None
     assert "philippe" in sn.firstnames and "lula" not in sn.firstnames
     p = tmp_path / "surnames.json"; sn.to_json(str(p))

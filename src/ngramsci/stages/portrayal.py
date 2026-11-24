@@ -188,10 +188,11 @@ def name_rows(text, ents, compounds=frozenset()):
     named, bare = _chains(text, ents, compounds)
     out = {(n, "full") for _, n, _ in named} | {(sn, "bare") for _, sn, _, fem, _ in bare if not fem}
     o = ents[(ents["cat"] != "PER") & (ents["prop"] == "PROP")]
-    for a, b in zip(o["onset"], o["offset"]):
-        t = strip_title(text[int(a):int(b)].strip())[0]
-        if t and "///" not in t and t[0].isupper() and SURNAME_RE.match(t):
-            out.add((t, "other"))
+    for a, b in zip(o["onset"], o["offset"]):                  # every capitalised word: « le groupe Renault »
+        for t in text[int(a):int(b)].replace("///", " ").split():
+            t = t.strip(".,;:!?()«»\"")
+            if t and t[0].isupper() and SURNAME_RE.match(t):
+                out.add((t, "other"))
     return out
 
 
@@ -273,6 +274,7 @@ class Surnames:
         ex = {name_key(x) for x in exclude}
         counts = counts[~counts["full_name"].map(lambda n: name_key(n.split()[0]) in NOT_FIRST)]
         first = counts.assign(f=counts["full_name"].map(lambda n: name_key(n.split()[0]))).groupby("f")["n"].sum()
+        firstnames = {k for k, v in first.items() if v >= min_n}
         counts = counts.assign(key=counts["full_name"].map(lambda n: sorted(name_keys(n)))).explode("key")
         bare = bare.assign(name=bare["full_name"].map(lambda n: strip_title(n)[0])).query("name != ''")
         bare = bare.assign(key=bare["name"].map(name_key), name=bare["name"].map(canon))
@@ -296,6 +298,7 @@ class Surnames:
             table.setdefault(r.key, {})[int(r.year)] = disp[r.nk]
         # single names (« Madonna »): many bare chains, (almost) no full name holding the word
         b = bare[~bare["key"].isin(ex | NOT_PERSON | set(compounds)) & ~bare["key"].map(lambda k: k in NOT_FIRST).astype(bool)]
+        b = b[~b["name"].map(lambda n: n.isupper() or any(ch.isdigit() for ch in n)).astype(bool)]   # RFI, M6: acronyms
         if len(other):
             on = other.assign(key=other["full_name"].map(lambda n: name_key(strip_title(n)[0]))).groupby("key")["n"].sum()
             bn = b.groupby("key")["n"].sum()
@@ -311,10 +314,10 @@ class Surnames:
             # a few full names holding the word, one of them dominant: that person (« Adolf Hitler »)
             few = w.assign(tot=w.groupby(["key", "year"])["n"].transform("sum"))
             few = few[(few["n"] >= share * few["tot"]) & (few["n"] >= min_full)].drop_duplicates(["key", "year"])
+            few = few[few["nk"].map(lambda nk: nk.split()[0] in firstnames)]      # « Adolf Hitler », not « L'action Carrefour »
             few = {(r.key, int(r.year)): disp[r.nk] for r in few.itertuples()}
             for r in bw.itertuples():
                 table.setdefault(r.key, {}).setdefault(int(r.year), few.get((r.key, int(r.year)), bdisp[r.key]))
-        firstnames = {k for k, v in first.items() if v >= min_n}
         return cls(table, compounds, firstnames, aliases)
 
     def to_json(self, path):
