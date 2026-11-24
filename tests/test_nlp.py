@@ -173,13 +173,16 @@ def test_lula_mononyms_and_first_name_guard(tmp_path):
                            (2022, "Lula", "bare", 400), (2022, "Madonna", "bare", 50), (2022, "Dieu", "bare", 90),
                            (2022, "José Luis Rodríguez Zapatero", "full", 40), (2022, "Luis Fernandez", "full", 30),
                            (2022, "Edouard Philippe", "full", 300), (2022, "Philippe Martinez", "full", 60),
-                           (2022, "Silva", "bare", 30), (2022, "Marina Silva", "full", 25)],
+                           (2022, "Silva", "bare", 30), (2022, "Marina Silva", "full", 25),
+                           (2022, "Carrefour", "bare", 40), (2022, "Carrefour", "other", 300),
+                           (2022, "Hitler", "bare", 200), (2022, "Adolf Hitler", "full", 8)],
                           columns=["year", "full_name", "kind", "n"])
     al = {"lula da silva": "Luiz Inácio Lula da Silva", "lula": "Luiz Inácio Lula da Silva",
           "luiz inacio lula da silva": "Luiz Inácio Lula da Silva"}
     sn = Surnames.build(counts, aliases=al)
     assert sn.get("lula", 2022) == "Luiz Inácio Lula da Silva" and sn.get("zapatero", 2022) == "José Luis Rodríguez Zapatero"
     assert sn.get("madonna", 2022) == "Madonna" and sn.get("dieu", 2022) is None
+    assert sn.get("carrefour", 2022) is None and sn.get("hitler", 2022) == "Adolf Hitler"
     assert sn.get("luis", 2022) is None and sn.get("philippe", 2022) is None and sn.get("silva", 2022) is None
     assert "philippe" in sn.firstnames and "lula" not in sn.firstnames
     p = tmp_path / "surnames.json"; sn.to_json(str(p))

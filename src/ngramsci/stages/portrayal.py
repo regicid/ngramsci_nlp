@@ -182,10 +182,17 @@ def people(text, ents, min_mentions=1, surnames=None, year=None, only_surname=Fa
 
 
 def name_rows(text, ents, compounds=frozenset()):
-    """What the family-name table counts in one article: {(name, kind)}, kind "full" (a chain's « First Last ») or
-    "bare" (a chain's bare name, not only with a feminine title)."""
+    """What the family-name table counts in one article: {(name, kind)}, kind "full" (a chain's « First Last »), "bare"
+    (a chain's bare name, not only with a feminine title) or "other" (a one-word proper name the NER tags as something
+    else than a person: « Carrefour », « Lille »; single names must be mostly people)."""
     named, bare = _chains(text, ents, compounds)
-    return {(n, "full") for _, n, _ in named} | {(sn, "bare") for _, sn, _, fem, _ in bare if not fem}
+    out = {(n, "full") for _, n, _ in named} | {(sn, "bare") for _, sn, _, fem, _ in bare if not fem}
+    o = ents[(ents["cat"] != "PER") & (ents["prop"] == "PROP")]
+    for a, b in zip(o["onset"], o["offset"]):
+        t = strip_title(text[int(a):int(b)].strip())[0]
+        if t and "///" not in t and t[0].isupper() and SURNAME_RE.match(t):
+            out.add((t, "other"))
+    return out
 
 
 # words found before a family name that are not first names (« Général de Gaulle », « Vive de Gaulle », « Lycée Jaurès »)
@@ -234,10 +241,13 @@ class Surnames:
         return self.aliases.get(name_key(name), name)
 
     @classmethod
-    def build(cls, counts: pd.DataFrame, share=0.9, min_n=20, window=1, mono_ratio=0.1, aliases=None,
+    def build(cls, counts: pd.DataFrame, share=0.9, min_n=20, window=1, mono_ratio=0.1, min_person=0.8, min_full=3,
+              aliases=None,
               exclude=("Le Pen", "Marseille", "Paris", "Lyon", "Toulouse", "Nice", "Bordeaux", "France")):
         """counts: columns year, full_name, n, kind ("full": a « First Last », the default; "bare": a chain's bare name,
-        name_rows()). Compound family names « A B » are found first: « A » is (almost) never a first name, i.e. >= `share`
+        name_rows(); "other": the word tagged as something else than a person). A single name must be a person in
+        >= `min_person` of its articles (bare / (bare + other)); when a few full names hold it (>= `min_full` articles,
+        one holding >= `share`), it is that full name (« Hitler » -> « Adolf Hitler »). Compound family names « A B » are found first: « A » is (almost) never a first name, i.e. >= `share`
         of the full names starting with « A » are « A B », and « First A B » exists (>= `min_n` articles each):
         « Giscard d'Estaing », « Mendès France », « Couve de Murville »."""
         from ..explorer import name_key
@@ -246,7 +256,8 @@ class Surnames:
         if "kind" not in counts.columns:
             counts = counts.assign(kind="full")
         bare = counts[counts["kind"] == "bare"]
-        counts = counts[counts["kind"] != "bare"]
+        other = counts[counts["kind"] == "other"]
+        counts = counts[counts["kind"] == "full"]
         counts = counts.assign(full_name=counts["full_name"].map(lambda n: canon(strip_title(n)[0]))).query("full_name != ''")
         tot = counts.assign(nk=counts["full_name"].map(name_key)).groupby("nk")["n"].sum()
         first = counts.assign(f=counts["full_name"].map(lambda n: name_key(n.split()[0]))).groupby("f")["n"].sum()
@@ -269,7 +280,8 @@ class Surnames:
         ex |= {k for k, v in fam.items() if first.get(k, 0) >= 0.1 * v}
         c = counts[~counts["key"].isin(ex)]
         c = c.assign(nk=c["full_name"].map(name_key))
-        disp = c.groupby("nk")["full_name"].agg(lambda s: s.value_counts().index[0])
+        disp = c.groupby(["nk", "full_name"])["n"].sum().sort_values().groupby(level=0).tail(1)
+        disp = pd.Series(disp.index.get_level_values(1), index=disp.index.get_level_values(0))
 
         def windowed(g, cols):
             parts = [g.assign(year=g["year"] + d) for d in range(-window, window + 1)]
@@ -284,14 +296,24 @@ class Surnames:
             table.setdefault(r.key, {})[int(r.year)] = disp[r.nk]
         # single names (« Madonna »): many bare chains, (almost) no full name holding the word
         b = bare[~bare["key"].isin(ex | NOT_PERSON | set(compounds)) & ~bare["key"].map(lambda k: k in NOT_FIRST).astype(bool)]
+        if len(other):
+            on = other.assign(key=other["full_name"].map(lambda n: name_key(strip_title(n)[0]))).groupby("key")["n"].sum()
+            bn = b.groupby("key")["n"].sum()
+            person = bn / bn.add(on.reindex(bn.index).fillna(0))
+            b = b[b["key"].map(person).fillna(1) >= min_person]
         if len(b):
-            bdisp = b.groupby("key")["name"].agg(lambda s: s.value_counts().index[0])
+            bdisp = b.groupby(["key", "name"])["n"].sum().sort_values().groupby(level=0).tail(1)
+            bdisp = dict(zip(bdisp.index.get_level_values(0), bdisp.index.get_level_values(1)))
             bw = windowed(b.groupby(["key", "year"])["n"].sum().reset_index(), ["key", "year"])
             fw = windowed(counts.groupby(["key", "year"])["n"].sum().reset_index(), ["key", "year"])
             bw = bw.merge(fw, on=["key", "year"], how="left", suffixes=("", "_full")).fillna({"n_full": 0})
             bw = bw[(bw["n"] >= min_n) & (bw["n_full"] < mono_ratio * bw["n"])]
+            # a few full names holding the word, one of them dominant: that person (« Adolf Hitler »)
+            few = w.assign(tot=w.groupby(["key", "year"])["n"].transform("sum"))
+            few = few[(few["n"] >= share * few["tot"]) & (few["n"] >= min_full)].drop_duplicates(["key", "year"])
+            few = {(r.key, int(r.year)): disp[r.nk] for r in few.itertuples()}
             for r in bw.itertuples():
-                table.setdefault(r.key, {}).setdefault(int(r.year), bdisp[r.key])
+                table.setdefault(r.key, {}).setdefault(int(r.year), few.get((r.key, int(r.year)), bdisp[r.key]))
         firstnames = {k for k, v in first.items() if v >= min_n}
         return cls(table, compounds, firstnames, aliases)
 
