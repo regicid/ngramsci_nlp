@@ -200,6 +200,14 @@ def test_lula_mononyms_and_first_name_guard(tmp_path):
     got = {c: (n, src) for c, n, _, src in people("Brésil///Lula parle.", _ents("Brésil///Lula parle.", [(0, "Lula", "PROP", "Singular")]),
                                                   surnames=sj, year=2015, with_source=True)}
     assert got == {0: ("Luiz Inácio Lula da Silva", "alias")}
+    from ngramsci.stages.portrayal import name_rows
+    text = "Bourse///Madonna chante. Nike recule. Le groupe américain licencie. Madonna rit. L'entraîneur du club sourit."
+    ents = _ents(text, [(0, "Madonna", "PROP", "Singular"), (1, "Nike", "PROP", "Singular"),
+                        (1, "Le groupe américain", "NOM", "Singular"), (0, "Madonna", "PROP", "Singular"),
+                        (0, "L'entraîneur du club", "NOM", "Singular")])
+    assert name_rows(text, ents) == {("Madonna", "bare"), ("Nike", "other")}
+    sn2 = Surnames({"nike": {2022: "Nike"}, "madonna": {2022: "Madonna"}})
+    assert {n for _, n, _ in people(text, ents, surnames=sn2, year=2022)} == {"Madonna"}
     text = "Grève///Edouard Philippe reçoit Philippe Martinez. Philippe répond. M. Philippe insiste."
     ents = _ents(text, [(0, "Edouard Philippe", "PROP", "Singular"), (1, "Philippe Martinez", "PROP", "Singular"),
                         (2, "Philippe", "PROP", "Singular"), (3, "M. Philippe", "PROP", "Singular")])

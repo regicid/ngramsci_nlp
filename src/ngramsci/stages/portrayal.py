@@ -116,8 +116,32 @@ def name_keys(name: str) -> set:
     return keys
 
 
-def _chains(text, ents, compounds, min_mentions=1):
-    """Named chains [(chain, « First Last », spans)] and bare ones [(chain, family or single name, spans, fem, titled)]."""
+# nouns a chain uses for an organisation, a brand or a medium (« le groupe », « la marque », « l'hebdomadaire »): a bare
+# chain holding one is not a person (the NER tags « Danone », « Nike », « Télérama » as people)
+ORG_NOUNS = set("groupe entreprise societe firme marque compagnie equipementier constructeur fabricant banque assureur "
+                "laboratoire operateur distributeur enseigne filiale holding geant journal quotidien hebdomadaire magazine "
+                "mensuel chaine radio station site media agence institut cabinet club equipe parti syndicat association "
+                "fondation organisation ong mouvement fonds plateforme application reseau editeur studio label".split())
+
+
+DETS = set("le la les l un une des du de d ce cet cette ces son sa ses leur leurs notre nos votre vos au aux".split())
+
+
+def is_org(g, text) -> bool:
+    """A chain with a common-noun mention headed by an organisation noun (« le groupe américain », not « l'entraîneur du
+    club »: the first word after the determiners)."""
+    from ..explorer import name_key
+    for a, b, p in zip(g["onset"], g["offset"], g["prop"]):
+        if p == "NOM":
+            w = [x for x in name_key(text[int(a):int(b)]).split() if x not in DETS]
+            if w and w[0] in ORG_NOUNS:
+                return True
+    return False
+
+
+def _chains(text, ents, compounds, min_mentions=1, with_org=False):
+    """Named chains [(chain, « First Last », spans)] and bare ones [(chain, family or single name, spans, fem, titled)]
+    (+ org, is_org(), with `with_org`)."""
     named, bare = [], []
     per = ents[(ents["cat"] == "PER") & ents["COREF"].notna()]
     for ch, g in per.groupby("COREF"):
@@ -133,7 +157,7 @@ def _chains(text, ents, compounds, min_mentions=1):
         else:
             sn, fem, titled = bare_surname(surf, compounds, with_title=True)
             if sn:
-                bare.append((int(ch), sn, spans, fem, titled))
+                bare.append((int(ch), sn, spans, fem, titled) + ((is_org(g, text),) if with_org else ()))
     return named, bare
 
 
@@ -157,12 +181,12 @@ def people(text, ents, min_mentions=1, surnames=None, year=None, only_surname=Fa
     from ..explorer import name_key
     compounds = getattr(surnames, "compounds", frozenset())
     canon = surnames.canon if surnames is not None else (lambda n: n)
-    named, bare = _chains(text, ents, compounds, min_mentions)
+    named, bare = _chains(text, ents, compounds, min_mentions, with_org=True)
     named = [(ch, canon(n), sp, "chain") for ch, n, sp in named]
     firsts = {name_key(n.split()[0]) for _, n, _, _ in named}             # first names of this article's people
     common_first = getattr(surnames, "firstnames", frozenset()) | firsts
     found = []
-    for ch, sn, spans, fem, titled in bare:
+    for ch, sn, spans, fem, titled, org in bare:
         k = name_key(sn)
         fam = {n for _, n, _, _ in named if name_key(surname_of(n)) == k}
         inner = {n for _, n, _, _ in named if k in name_keys(n)} - fam if k not in common_first else set()
@@ -175,7 +199,7 @@ def people(text, ents, min_mentions=1, surnames=None, year=None, only_surname=Fa
             continue
         elif not fem and surnames is not None and k in surnames.aliases:
             found.append((ch, surnames.aliases[k], spans, "alias"))
-        elif not fem and surnames is not None and (name := surnames.get(k, year)):
+        elif not fem and not org and surnames is not None and (name := surnames.get(k, year)):
             found.append((ch, name, spans, "family_name"))
     out = found if only_surname else named + found
     return out if with_source else [x[:3] for x in out]
@@ -184,15 +208,14 @@ def people(text, ents, min_mentions=1, surnames=None, year=None, only_surname=Fa
 def name_rows(text, ents, compounds=frozenset()):
     """What the family-name table counts in one article: {(name, kind)}, kind "full" (a chain's « First Last »), "bare"
     (a chain's bare name, not only with a feminine title) or "other" (a one-word proper name the NER tags as something
-    else than a person: « Carrefour », « Lille »; single names must be mostly people)."""
-    named, bare = _chains(text, ents, compounds)
-    out = {(n, "full") for _, n, _ in named} | {(sn, "bare") for _, sn, _, fem, _ in bare if not fem}
+    else than a person: « Carrefour », « Lille »; or a bare chain calling it « le groupe », « la marque »: is_org())."""
+    named, bare = _chains(text, ents, compounds, with_org=True)
+    out = {(n, "full") for _, n, _ in named} | {(sn, "other" if org else "bare") for _, sn, _, fem, _, org in bare if not fem}
     o = ents[(ents["cat"] != "PER") & (ents["prop"] == "PROP")]
-    for a, b in zip(o["onset"], o["offset"]):                  # every capitalised word: « le groupe Renault »
-        for t in text[int(a):int(b)].replace("///", " ").split():
-            t = t.strip(".,;:!?()«»\"")
-            if t and t[0].isupper() and SURNAME_RE.match(t):
-                out.add((t, "other"))
+    for a, b in zip(o["onset"], o["offset"]):
+        t = strip_title(text[int(a):int(b)].strip())[0]
+        if t and "///" not in t and t[0].isupper() and SURNAME_RE.match(t):
+            out.add((t, "other"))
     return out
 
 
