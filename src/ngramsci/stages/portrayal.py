@@ -77,7 +77,8 @@ def surname_of(name: str) -> str:
 
 def bare_surname(surfaces, compounds=frozenset(), with_title=False):
     """Most frequent family name of a chain without a full name: « Mélenchon », « M. Mélenchon », « Le Pen », and compound
-    family names (« M. Giscard d'Estaing »). with_title: (name, True if it only ever came with a feminine title)."""
+    family names (« M. Giscard d'Estaing »); also a single name (« Lula », « Madonna »). with_title: (name, True if it only
+    ever came with a feminine title, True if it ever came with a title)."""
     from ..explorer import name_key
     c, fem = collections.Counter(), collections.defaultdict(set)
     for t in surfaces:
@@ -85,23 +86,38 @@ def bare_surname(surfaces, compounds=frozenset(), with_title=False):
         if not t or t.split()[0].lower() in ("son", "sa", "ses", "ce", "cette"):
             continue
         if name_key(t) in compounds or (t.split()[-1][0].isupper() and SURNAME_RE.match(t)):
-            c[t] += 1; fem[t].add(title in FEMININE)
+            c[t] += 1; fem[t].add(title)
     if not c:
-        return (None, False) if with_title else None
+        return (None, False, False) if with_title else None
     sn = c.most_common(1)[0][0]
-    return (sn, fem[sn] == {True}) if with_title else sn
+    if not with_title:
+        return sn
+    return sn, all(t in FEMININE for t in fem[sn]), any(t is not None for t in fem[sn])
 
 
-def people(text, ents, min_mentions=1, surnames=None, year=None, only_surname=False, with_source=False):
-    """[(chain id, full name, [(onset, offset)])] for the PER chains of one article.
-    A chain with no « First Last » mention but a family name (« Mélenchon », « M. Mélenchon », « Mme Veil », « Giscard
-    d'Estaing ») takes the article's one « <first> Mélenchon » if there is exactly one, else the person `surnames`
-    (Surnames) gives for that name and year, except for names that only come with a feminine title (« Mme Chirac » is not
-    the year's dominant Chirac). Titles are never part of a name (« Mme Simone Veil » -> Simone Veil).
-    only_surname: return only the chains named that way (to score them on top of an earlier run).
-    with_source: 4-tuples, + where the name comes from: "chain" (the chain's own « First Last »), "article" (a family name
-    resolved by the article's one « First X »), "family_name" (the person `surnames` gives for that year)."""
-    compounds = getattr(surnames, "compounds", frozenset())
+NAME_PARTICLES = set("de du des d da das do dos del della di von van der den ter le la ben bin ibn el al y".split())
+
+
+def name_keys(name: str) -> set:
+    """Keys a bare word can stand for in a full name: the family name (everything after the first name) and each later
+    word alone. « Luiz Inácio Lula da Silva »: inacio lula da silva, inacio, lula, silva; « Bachar al-Assad »: al assad,
+    assad; « Marine Le Pen »: le pen, pen."""
+    from ..explorer import name_key
+    keys = {name_key(surname_of(name))}
+    for w in name.split()[1:]:
+        k = name_key(w)
+        if not k or k in NAME_PARTICLES:
+            continue
+        keys.add(k)
+        p = k.split()
+        if len(p) > 1 and p[0] in NAME_PARTICLES:
+            keys.add(" ".join(p[1:]))
+    keys.discard("")
+    return keys
+
+
+def _chains(text, ents, compounds, min_mentions=1):
+    """Named chains [(chain, « First Last », spans)] and bare ones [(chain, family or single name, spans, fem, titled)]."""
     named, bare = [], []
     per = ents[(ents["cat"] == "PER") & ents["COREF"].notna()]
     for ch, g in per.groupby("COREF"):
@@ -113,22 +129,63 @@ def people(text, ents, min_mentions=1, surnames=None, year=None, only_surname=Fa
         spans = [(int(a), int(b)) for a, b in zip(g["onset"], g["offset"])]
         name = full_name(surf, compounds)
         if name:
-            named.append((int(ch), name, spans, "chain"))
+            named.append((int(ch), name, spans))
         else:
-            sn, fem = bare_surname(surf, compounds, with_title=True)
+            sn, fem, titled = bare_surname(surf, compounds, with_title=True)
             if sn:
-                bare.append((int(ch), sn, spans, fem))
+                bare.append((int(ch), sn, spans, fem, titled))
+    return named, bare
+
+
+def people(text, ents, min_mentions=1, surnames=None, year=None, only_surname=False, with_source=False):
+    """[(chain id, full name, [(onset, offset)])] for the PER chains of one article.
+    A chain with no « First Last » mention but a bare name (« Mélenchon », « M. Mélenchon », « Mme Veil », « Giscard
+    d'Estaing », « Lula ») is named, in this order, by:
+      article      the article's one full name holding that word: its family name (« Jean-Luc Mélenchon »), or a later word
+                   that is not a first name (« Lula » -> « Luiz Inácio Lula da Silva »; never « Luis » -> « José Luis
+                   Rodríguez Zapatero »). A word also used as a first name (« Philippe ») takes « Édouard Philippe » only
+                   if the chain has a title (« M. Philippe ») or nobody in the article has that first name;
+      alias        the hand alias table (data/aliases.json, « Lula » -> « Luiz Inácio Lula da Silva »);
+      family_name  the person `surnames` (Surnames) gives for that word and year: a family name, a later word of a full
+                   name, or a single name nobody has a first name for (« Madonna »). Names that only come with a feminine
+                   title are left out (« Mme Chirac » is not the year's dominant Chirac).
+    Titles are never part of a name (« Mme Simone Veil » -> Simone Veil); full names are mapped through the aliases
+    (« Lula da Silva » -> « Luiz Inácio Lula da Silva »).
+    only_surname: return only the chains named from a bare name (to score them on top of an earlier run).
+    with_source: 4-tuples, + where the name comes from: "chain" (the chain's own « First Last »), "article", "alias",
+    "family_name"."""
     from ..explorer import name_key
+    compounds = getattr(surnames, "compounds", frozenset())
+    canon = surnames.canon if surnames is not None else (lambda n: n)
+    named, bare = _chains(text, ents, compounds, min_mentions)
+    named = [(ch, canon(n), sp, "chain") for ch, n, sp in named]
+    firsts = {name_key(n.split()[0]) for _, n, _, _ in named}             # first names of this article's people
+    common_first = getattr(surnames, "firstnames", frozenset()) | firsts
     found = []
-    for ch, sn, spans, fem in bare:
+    for ch, sn, spans, fem, titled in bare:
         k = name_key(sn)
-        here = {n for _, n, _, _ in named if name_key(surname_of(n)) == k}
+        fam = {n for _, n, _, _ in named if name_key(surname_of(n)) == k}
+        inner = {n for _, n, _, _ in named if k in name_keys(n)} - fam if k not in common_first else set()
+        here = fam | inner
+        if k in firsts and not titled:
+            here = set()                                                   # « Philippe » next to « Philippe Martinez »
         if len(here) == 1:
             found.append((ch, here.pop(), spans, "article"))
-        elif not here and not fem and surnames is not None and (name := surnames.get(k, year)):
+        elif here:
+            continue
+        elif not fem and surnames is not None and k in surnames.aliases:
+            found.append((ch, surnames.aliases[k], spans, "alias"))
+        elif not fem and surnames is not None and (name := surnames.get(k, year)):
             found.append((ch, name, spans, "family_name"))
     out = found if only_surname else named + found
     return out if with_source else [x[:3] for x in out]
+
+
+def name_rows(text, ents, compounds=frozenset()):
+    """What the family-name table counts in one article: {(name, kind)}, kind "full" (a chain's « First Last ») or
+    "bare" (a chain's bare name, not only with a feminine title)."""
+    named, bare = _chains(text, ents, compounds)
+    return {(n, "full") for _, n, _ in named} | {(sn, "bare") for _, sn, _, fem, _ in bare if not fem}
 
 
 # words found before a family name that are not first names (« Général de Gaulle », « Vive de Gaulle », « Lycée Jaurès »)
@@ -137,29 +194,60 @@ NOT_FIRST = set("general president presidente vive marechal amiral colonel comma
                 "aeroport fondation institut centre hopital ecole universite pont stade gare "
                 # names the NER takes for people (« Debout la France », « Downing Street »…), found in the table 2026-11-22
                 "debout downing scotland boko bottega correspondant correspondante nuit".split())
+# single words the NER may tag as people that are never someone's name on their own (mononym route)
+NOT_PERSON = set("dieu allah seigneur marianne matignon elysee bercy beauvau quai washington moscou pekin londres berlin "
+                 "bruxelles rome madrid kiev kyiv washington europe afrique amerique twitter facebook google".split())
+
+
+def load_aliases(path) -> dict:
+    """data/aliases.json {canonical name: [other names]} -> {name key: canonical name} (the canonical's own key too)."""
+    import json
+    from ..explorer import name_key
+    out = {}
+    for canon, others in json.load(open(path, encoding="utf-8")).items():
+        for n in [canon, *others]:
+            out[name_key(n)] = canon
+    return out
 
 
 class Surnames:
-    """Family name -> the one person it stands for in a given year: the first name holding >= `share` of the articles
-    naming someone « <first> <family name> » in year-1..year+1, with >= `min_n` such articles. `exclude`: family names
-    never resolved (Le Pen: Marine, Jean-Marie, Marion; places the NER may take for people). A family name that is also a first name (used as one in >= 10% as
-    many articles: Philippe, Bertrand, Laurent) is never resolved either: a bare « Philippe » is usually someone's first
-    name. Built from counts {(family key, year, full name): n articles}."""
-    def __init__(self, table: dict, compounds=()):
-        self.t = table                                   # {family key: {year: full name}}
+    """Bare name -> the one person it stands for in a given year: the full name holding >= `share` of the articles
+    naming someone « ... <word> ... » with that word after the first name (its family name or a later word: « Lula » in
+    « Luiz Inácio Lula da Silva ») in year-1..year+1, with >= `min_n` such articles; or the word itself (« Madonna ») when
+    it names >= `min_n` bare chains and full names holding it are < `mono_ratio` as many. `exclude`: words never resolved
+    (Le Pen: Marine, Jean-Marie, Marion; places the NER may take for people). A word also used as a first name (in >= 10%
+    as many articles: Philippe, Bertrand, Laurent) is never resolved either: a bare « Philippe » is usually someone's first
+    name. `firstnames`: words used as a first name in >= `min_n` articles (people() never takes them as a later word).
+    `aliases` {name key: canonical name}: one person's spellings (« Lula da Silva », « Luiz Inácio Lula »), applied to the
+    counts and to every name people() gives. Built from counts {(year, name, kind): n articles}."""
+    def __init__(self, table: dict, compounds=(), firstnames=(), aliases=None):
+        self.t = table                                   # {key: {year: name}}
         self.compounds = frozenset(compounds)            # keys of compound family names (« giscard d estaing »)
+        self.firstnames = frozenset(firstnames)
+        self.aliases = dict(aliases or {})
 
     def get(self, key, year):
         return self.t.get(key, {}).get(int(year)) if year else None
 
-    @classmethod
-    def build(cls, counts: pd.DataFrame, share=0.9, min_n=20, window=1,
-              exclude=("Le Pen", "Marseille", "Paris", "Lyon", "Toulouse", "Nice", "Bordeaux", "France")):
-        """counts: columns key (family key), year, full_name, n. Compound family names « A B » are found first: « A » is
-        (almost) never a first name, i.e. >= `share` of the full names starting with « A » are « A B », and « First A B »
-        exists (>= `min_n` articles each): « Giscard d'Estaing », « Mendès France », « Couve de Murville »."""
+    def canon(self, name):
         from ..explorer import name_key
-        counts = counts.assign(full_name=counts["full_name"].map(lambda n: strip_title(n)[0])).query("full_name != ''")
+        return self.aliases.get(name_key(name), name)
+
+    @classmethod
+    def build(cls, counts: pd.DataFrame, share=0.9, min_n=20, window=1, mono_ratio=0.1, aliases=None,
+              exclude=("Le Pen", "Marseille", "Paris", "Lyon", "Toulouse", "Nice", "Bordeaux", "France")):
+        """counts: columns year, full_name, n, kind ("full": a « First Last », the default; "bare": a chain's bare name,
+        name_rows()). Compound family names « A B » are found first: « A » is (almost) never a first name, i.e. >= `share`
+        of the full names starting with « A » are « A B », and « First A B » exists (>= `min_n` articles each):
+        « Giscard d'Estaing », « Mendès France », « Couve de Murville »."""
+        from ..explorer import name_key
+        aliases = dict(aliases or {})
+        canon = lambda n: aliases.get(name_key(n), n)
+        if "kind" not in counts.columns:
+            counts = counts.assign(kind="full")
+        bare = counts[counts["kind"] == "bare"]
+        counts = counts[counts["kind"] != "bare"]
+        counts = counts.assign(full_name=counts["full_name"].map(lambda n: canon(strip_title(n)[0]))).query("full_name != ''")
         tot = counts.assign(nk=counts["full_name"].map(name_key)).groupby("nk")["n"].sum()
         first = counts.assign(f=counts["full_name"].map(lambda n: name_key(n.split()[0]))).groupby("f")["n"].sum()
         compounds = set()
@@ -171,46 +259,65 @@ class Surnames:
                     compounds.add(r)
         # a compound written alone (« Giscard d'Estaing ») is a family name, not a full name: out of the counts
         counts = counts[~counts["full_name"].map(name_key).isin(compounds)]
-        counts = counts.assign(key=counts["full_name"].map(lambda n: name_key(surname_of(n))))
         ex = {name_key(x) for x in exclude}
         counts = counts[~counts["full_name"].map(lambda n: name_key(n.split()[0]) in NOT_FIRST)]
         first = counts.assign(f=counts["full_name"].map(lambda n: name_key(n.split()[0]))).groupby("f")["n"].sum()
-        fam = counts.groupby("key")["n"].sum()
+        counts = counts.assign(key=counts["full_name"].map(lambda n: sorted(name_keys(n)))).explode("key")
+        bare = bare.assign(name=bare["full_name"].map(lambda n: strip_title(n)[0])).query("name != ''")
+        bare = bare.assign(key=bare["name"].map(name_key), name=bare["name"].map(canon))
+        fam = counts.groupby("key")["n"].sum().add(bare.groupby("key")["n"].sum(), fill_value=0)
         ex |= {k for k, v in fam.items() if first.get(k, 0) >= 0.1 * v}
         c = counts[~counts["key"].isin(ex)]
         c = c.assign(nk=c["full_name"].map(name_key))
         disp = c.groupby("nk")["full_name"].agg(lambda s: s.value_counts().index[0])
-        g = c.groupby(["key", "year", "nk"])["n"].sum().reset_index()
-        parts = [g.assign(year=g["year"] + d) for d in range(-window, window + 1)]
-        w = pd.concat(parts).groupby(["key", "year", "nk"])["n"].sum().reset_index()
+
+        def windowed(g, cols):
+            parts = [g.assign(year=g["year"] + d) for d in range(-window, window + 1)]
+            return pd.concat(parts).groupby(cols)["n"].sum().reset_index()
+
+        w = windowed(c.groupby(["key", "year", "nk"])["n"].sum().reset_index(), ["key", "year", "nk"])
         tot = w.groupby(["key", "year"])["n"].transform("sum")
         top = w[w["n"] == w.groupby(["key", "year"])["n"].transform("max")].assign(tot=tot)
         top = top[(top["n"] >= share * top["tot"]) & (top["tot"] >= min_n)].drop_duplicates(["key", "year"])
         table: dict = {}
         for r in top.itertuples():
             table.setdefault(r.key, {})[int(r.year)] = disp[r.nk]
-        return cls(table, compounds)
+        # single names (« Madonna »): many bare chains, (almost) no full name holding the word
+        b = bare[~bare["key"].isin(ex | NOT_PERSON | set(compounds)) & ~bare["key"].map(lambda k: k in NOT_FIRST).astype(bool)]
+        if len(b):
+            bdisp = b.groupby("key")["name"].agg(lambda s: s.value_counts().index[0])
+            bw = windowed(b.groupby(["key", "year"])["n"].sum().reset_index(), ["key", "year"])
+            fw = windowed(counts.groupby(["key", "year"])["n"].sum().reset_index(), ["key", "year"])
+            bw = bw.merge(fw, on=["key", "year"], how="left", suffixes=("", "_full")).fillna({"n_full": 0})
+            bw = bw[(bw["n"] >= min_n) & (bw["n_full"] < mono_ratio * bw["n"])]
+            for r in bw.itertuples():
+                table.setdefault(r.key, {}).setdefault(int(r.year), bdisp[r.key])
+        firstnames = {k for k, v in first.items() if v >= min_n}
+        return cls(table, compounds, firstnames, aliases)
 
     def to_json(self, path):
         import json
-        json.dump({"table": self.t, "compounds": sorted(self.compounds)}, open(path, "w"), ensure_ascii=False)
+        json.dump({"table": self.t, "compounds": sorted(self.compounds), "firstnames": sorted(self.firstnames)},
+                  open(path, "w"), ensure_ascii=False)
 
     @classmethod
-    def from_json(cls, path):
+    def from_json(cls, path, aliases="aliases.json"):
+        """`aliases`: the alias file, relative to the table's folder (data/aliases.json), read if it exists."""
         import json
         d = json.load(open(path))
         if "table" not in d:                                   # 2026-11-22 format: the table alone
             d = {"table": d, "compounds": []}
-        return cls({k: {int(y): n for y, n in v.items()} for k, v in d["table"].items()}, d["compounds"])
+        a = os.path.join(os.path.dirname(os.path.abspath(path)), aliases) if aliases else None
+        return cls({k: {int(y): n for y, n in v.items()} for k, v in d["table"].items()}, d["compounds"],
+                   d.get("firstnames", ()), load_aliases(a) if a and os.path.exists(a) else None)
 
 
 def name_counts(rows: pd.DataFrame) -> pd.DataFrame:
-    """Portrayal-style rows (doc_id, full_name, year) -> {(family key, year, full name): articles}, honorific names out."""
-    from ..explorer import name_key
-    r = rows[["doc_id", "full_name", "year"]].dropna().drop_duplicates()
-    r = r[~r["full_name"].str.split().str[0].isin(HONORIFIC)]
-    r = r.assign(key=r["full_name"].map(lambda n: name_key(surname_of(n))))
-    return r.groupby(["key", "year", "full_name"]).size().rename("n").reset_index()
+    """Rows (doc_id, full_name, year[, kind]) -> {(year, name, kind): articles}, honorific full names out."""
+    r = rows.assign(kind=rows["kind"] if "kind" in rows.columns else "full")
+    r = r[["doc_id", "full_name", "year", "kind"]].dropna().drop_duplicates()
+    r = r[(r["kind"] == "bare") | ~r["full_name"].str.split().str[0].isin(HONORIFIC)]
+    return r.groupby(["year", "full_name", "kind"]).size().rename("n").reset_index()
 
 
 def resolve_honorifics(found):

@@ -162,6 +162,46 @@ def test_compound_family_names_and_titles():
     assert 4 not in got                                            # « Mme Chirac » is not the year's dominant Chirac
 
 
+def test_lula_mononyms_and_first_name_guard(tmp_path):
+    """« Lula »: a later word of the article's full name, the alias table, or the year's table; single names (« Madonna »);
+    « Philippe » next to a « Philippe Martinez » stays unnamed; particles (da, von der, al-)."""
+    import json
+    from ngramsci.nlp.segments import NAMEOK
+    from ngramsci.stages.portrayal import Surnames, people
+    assert all(NAMEOK.match(n) for n in ["Luiz Inácio Lula da Silva", "Ursula von der Leyen", "Bachar al-Assad"])
+    counts = pd.DataFrame([(2022, "Luiz Inácio Lula da Silva", "full", 60), (2022, "Lula da Silva", "full", 30),
+                           (2022, "Lula", "bare", 400), (2022, "Madonna", "bare", 50), (2022, "Dieu", "bare", 90),
+                           (2022, "José Luis Rodríguez Zapatero", "full", 40), (2022, "Luis Fernandez", "full", 30),
+                           (2022, "Edouard Philippe", "full", 300), (2022, "Philippe Martinez", "full", 60),
+                           (2022, "Silva", "bare", 30), (2022, "Marina Silva", "full", 25)],
+                          columns=["year", "full_name", "kind", "n"])
+    al = {"lula da silva": "Luiz Inácio Lula da Silva", "lula": "Luiz Inácio Lula da Silva",
+          "luiz inacio lula da silva": "Luiz Inácio Lula da Silva"}
+    sn = Surnames.build(counts, aliases=al)
+    assert sn.get("lula", 2022) == "Luiz Inácio Lula da Silva" and sn.get("zapatero", 2022) == "José Luis Rodríguez Zapatero"
+    assert sn.get("madonna", 2022) == "Madonna" and sn.get("dieu", 2022) is None
+    assert sn.get("luis", 2022) is None and sn.get("philippe", 2022) is None and sn.get("silva", 2022) is None
+    assert "philippe" in sn.firstnames and "lula" not in sn.firstnames
+    p = tmp_path / "surnames.json"; sn.to_json(str(p))
+    json.dump({"Luiz Inácio Lula da Silva": ["Lula", "Lula da Silva"]}, open(tmp_path / "aliases.json", "w"))
+    sj = Surnames.from_json(str(p))
+    assert sj.canon("Lula da Silva") == "Luiz Inácio Lula da Silva" and sj.firstnames == sn.firstnames
+
+    text = "Brésil///Luiz Inácio Lula da Silva arrive. Lula parle. Luis sourit. Madonna chante."
+    ents = _ents(text, [(0, "Luiz Inácio Lula da Silva", "PROP", "Singular"), (1, "Lula", "PROP", "Singular"),
+                        (2, "Luis", "PROP", "Singular"), (3, "Madonna", "PROP", "Singular")])
+    got = {c: (n, src) for c, n, _, src in people(text, ents, surnames=sj, year=2022, with_source=True)}
+    assert got[1] == ("Luiz Inácio Lula da Silva", "article") and 2 not in got and got[3] == ("Madonna", "family_name")
+    got = {c: (n, src) for c, n, _, src in people("Brésil///Lula parle.", _ents("Brésil///Lula parle.", [(0, "Lula", "PROP", "Singular")]),
+                                                  surnames=sj, year=2015, with_source=True)}
+    assert got == {0: ("Luiz Inácio Lula da Silva", "alias")}
+    text = "Grève///Edouard Philippe reçoit Philippe Martinez. Philippe répond. M. Philippe insiste."
+    ents = _ents(text, [(0, "Edouard Philippe", "PROP", "Singular"), (1, "Philippe Martinez", "PROP", "Singular"),
+                        (2, "Philippe", "PROP", "Singular"), (3, "M. Philippe", "PROP", "Singular")])
+    got = {c: n for c, n, _ in people(text, ents, surnames=sn, year=2022)}
+    assert 2 not in got and got[3] == "Edouard Philippe"
+
+
 def test_surnames_json_formats(tmp_path):
     import json
     from ngramsci.stages.portrayal import Surnames

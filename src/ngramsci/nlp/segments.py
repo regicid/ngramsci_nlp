@@ -9,7 +9,10 @@ LABEL = re.compile(r"extr[êe]me[- ]?(?:droite|gauche)|ultra[- ]?(?:droite|gauch
                    r"factieu|arc r[ée]publicain|fascis|n[ée]onazi|identitaire", re.I)
 LINK = re.compile(r">?\s*(?:(?:À|A) (?:lire|LIRE|voir|VOIR)\b|(?:Lire|LIRE) (?:aussi|AUSSI|également|ÉGALEMENT)\b)")
 NOTE = "[Note: this passage is part of a quotation that begins earlier in the article.]"
-NAMEOK = re.compile(r"^[A-ZÀ-Ý][\w'’\-]+(?:\s+(?:de|du|d['’]|von|van|le|la|ben|el)?\s*[A-ZÀ-Ý][\w'’\-]+)+$")
+# lower-case name particles, several in a row allowed (« Ursula von der Leyen », « Luiz Inácio Lula da Silva »,
+# « Bachar al-Assad »)
+PARTICLES = "de|du|des|d['’]|da|das|do|dos|del|della|di|von|van|der|den|ter|le|la|ben|bin|el|al|y"
+NAMEOK = re.compile(rf"^[A-ZÀ-Ý][\w'’\-]+(?:\s+(?:(?:{PARTICLES})\s+)*(?:d['’]\s*|(?:al|el|ben|bin|ibn)-)?[A-ZÀ-Ý][\w'’\-]+)+$")
 
 
 def name_re(full_name: str) -> re.Pattern:
