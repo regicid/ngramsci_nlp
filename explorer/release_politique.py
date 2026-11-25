@@ -32,8 +32,12 @@ def fetch():
     files = sorted(f for f in HfApi().list_repo_files(R, repo_type="dataset") if f.split("/")[0] in DIRS)
     json.dump(files, open(MANIFEST, "w"))
     todo = [f for f in files if not os.path.exists(f"{CACHE}/{f}")]
+    if os.environ.get("FETCH_REVERSE") == "1":        # a second stream from the other end (2 streams stay under the limit)
+        todo = todo[::-1]
     print(f"{len(files)} board files, {len(todo)} to fetch", flush=True)
     for i, f in enumerate(todo):
+        if os.path.exists(f"{CACHE}/{f}"):            # fetched by the other stream meanwhile
+            continue
         for wait in [60, 120, 300, 300, 300, 300, 300, 600, 600, 600, None]:
             try:
                 hf_hub_download(R, f, repo_type="dataset", local_dir=CACHE); break
