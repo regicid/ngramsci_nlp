@@ -2,7 +2,8 @@
   python explorer/build_monthly.py cells    -> <W>/explorer/monthly/cells_all.parquet (+ names, verbs), 8 processes
   python explorer/build_monthly.py top N    -> <W>/explorer/monthly/monthly_topN.parquet (N most mentioned names)
   python explorer/build_monthly.py sqlite [MIN]  -> <W>/explorer/monthly/portraits.sqlite (cells + names, indexed: the API
-                                                db), names in at least MIN articles (default 100)
+                                                db), names in at least MIN articles (default 100); then portraits_precompute.py adds
+                                                cells_year (E_/EW_ expected-score sums) and totals_month
 
 Sections: Le Monde (newspaper « lemonde ») by its rubrique (lemonde_rub/rubriques.parquet: culture, international,
 politique, société, sport, économie); every politique-corpus outlet is section « politique »; presse3 (Le Figaro,
@@ -222,6 +223,9 @@ def sqlite(min_articles=100):
                          CREATE INDEX cells_key ON cells(key, month); CREATE INDEX cells_month ON cells(month, newspaper, section);
                          VACUUM;""")
     con.close()
+    # the site's precomputed tables (cells_year with E_/EW_ expected-score sums, totals_month), as on the API machine
+    import subprocess
+    subprocess.run([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "portraits_precompute.py"), db], check=True)
     print(db, os.path.getsize(db) / 1e9, "GB,", len(c), "cells,", len(names), "names", flush=True)
 
 
