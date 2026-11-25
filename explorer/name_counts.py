@@ -32,6 +32,13 @@ def inputs(corpus):
 
 
 def count(corpus, i, n):
+    """Task i of n. Parts of an earlier run with more tasks (part_K, K >= n) are moved to name_counts_stale/ by task 0:
+    the build reads every part (2026-11-25: 20 leftover parts of a 40-task run counted half of Le Monde twice)."""
+    if i == 0:
+        stale = f"{W}/name_counts_stale/{corpus}"
+        for f in glob.glob(f"{W}/name_counts/{corpus}/part_*.parquet"):
+            if int(os.path.basename(f)[5:8]) >= n:
+                os.makedirs(stale, exist_ok=True); os.replace(f, f"{stale}/{os.path.basename(f)}")
     al = load_aliases(f"{DATA}/aliases.json")
     compounds = Surnames.from_json(f"{DATA}/surnames.json").compounds
     rows = []

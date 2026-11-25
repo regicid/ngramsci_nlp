@@ -299,12 +299,16 @@ class Surnames:
         counts = counts.assign(full_name=counts["full_name"].map(lambda n: canon(strip_title(n)[0]))).query("full_name != ''")
         tot = counts.assign(nk=counts["full_name"].map(name_key)).groupby("nk")["n"].sum()
         first = counts.assign(f=counts["full_name"].map(lambda n: name_key(n.split()[0]))).groupby("f")["n"].sum()
+        # « Giscard d'Estaing » written alone: a full name in counts taken without the compound list, a bare name in
+        # counts taken with it (name_rows() never makes a known compound a full name): both count
+        alone = tot.add(bare.assign(nk=bare["full_name"].map(lambda n: name_key(strip_title(n)[0]))).groupby("nk")["n"].sum(),
+                        fill_value=0)
         compounds = set()
         for nk, n in tot.items():
             w = nk.split()
             if len(w) >= 3 and n >= min_n:
                 r = " ".join(w[1:])
-                if tot.get(r, 0) >= min_n and tot.get(r, 0) >= share * first.get(w[1], 0):
+                if alone.get(r, 0) >= min_n and alone.get(r, 0) >= share * first.get(w[1], 0):
                     compounds.add(r)
         # a compound written alone (« Giscard d'Estaing ») is a family name, not a full name: out of the counts
         counts = counts[~counts["full_name"].map(name_key).isin(compounds)]

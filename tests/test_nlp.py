@@ -243,6 +243,15 @@ def test_apostrophes_elisions_and_dieudonne():
         assert got[1] == want, (text, got)
 
 
+def test_compound_found_from_bare_counts():
+    """Counts taken with a compound list hold « Giscard d'Estaing » alone as a bare name, not a full one: still a compound."""
+    from ngramsci.stages.portrayal import Surnames
+    counts = pd.DataFrame([(1975, "Valéry Giscard d'Estaing", "full", 200), (1975, "Giscard d'Estaing", "full", 5),
+                           (1975, "Giscard d'Estaing", "bare", 400), (1975, "Giscard Samba", "full", 30)],
+                          columns=["year", "full_name", "kind", "n"])
+    assert "giscard d estaing" in Surnames.build(counts).compounds
+
+
 def test_surnames_json_formats(tmp_path):
     import json
     from ngramsci.stages.portrayal import Surnames
