@@ -215,6 +215,34 @@ def test_lula_mononyms_and_first_name_guard(tmp_path):
     assert 2 not in got and got[3] == "Edouard Philippe"
 
 
+def test_apostrophes_elisions_and_dieudonne():
+    """Apostrophes unified (« d‘Estaing » = « d'Estaing », one key); « L'équipe de France » is no name; « Dieudonné », a
+    single name more often than a first name, resolves, and next to one other Dieudonné is that person."""
+    from ngramsci.explorer import name_key
+    from ngramsci.stages.portrayal import Surnames, full_name, people
+    assert name_key("Valéry Giscard d’Estaing") == name_key("Valéry Giscard d‘Estaing") == name_key("Valéry Giscard d'Estaing") \
+        == "valery giscard d estaing"
+    assert full_name(["L’équipe de France"]) is None and full_name(["L'administration Trump"]) is None
+    text = "Paris///Valéry Giscard d‘Estaing arrive. Valéry Giscard d’Estaing parle."
+    ents = _ents(text, [(0, "Valéry Giscard d‘Estaing", "PROP", "Singular"), (0, "Valéry Giscard d’Estaing", "PROP", "Singular")])
+    assert [n for _, n, _ in people(text, ents)] == ["Valéry Giscard d'Estaing"]
+    counts = pd.DataFrame([(2014, "Dieudonné", "bare", 200), (2014, "Dieudonné M'Bala M'Bala", "full", 30),
+                           (2014, "Dieudonné Niangouna", "full", 20), (2014, "Dieudonné Sinon", "full", 20),
+                           (2014, "Philippe", "bare", 50), (2014, "Philippe Martinez", "full", 300)],
+                          columns=["year", "full_name", "kind", "n"])
+    al = {"dieudonne": "Dieudonné M'Bala M'Bala", "dieudonne m bala m bala": "Dieudonné M'Bala M'Bala"}
+    sn = Surnames.build(counts, aliases=al)
+    assert sn.get("dieudonne", 2014) == "Dieudonné M'Bala M'Bala" and sn.get("philippe", 2014) is None
+    for text, want in [("Humour///Dieudonné joue.", "Dieudonné M'Bala M'Bala"),
+                       ("Humour///Dieudonné M’Bala M’Bala arrive. Dieudonné joue.", "Dieudonné M'Bala M'Bala"),
+                       ("Théâtre///Dieudonné Niangouna arrive. Dieudonné joue.", "Dieudonné Niangouna")]:
+        mentions = [(0, "Dieudonné M’Bala M’Bala", "PROP", "Singular")] if "M’Bala" in text else \
+                   [(0, "Dieudonné Niangouna", "PROP", "Singular")] if "Niangouna" in text else []
+        ents = _ents(text, mentions + [(1, "Dieudonné", "PROP", "Singular")])
+        got = {c: n for c, n, _ in people(text, ents, surnames=sn, year=2014)}
+        assert got[1] == want, (text, got)
+
+
 def test_surnames_json_formats(tmp_path):
     import json
     from ngramsci.stages.portrayal import Surnames

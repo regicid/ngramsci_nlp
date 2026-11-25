@@ -24,8 +24,17 @@ DIMS = ["valence", "extremisme", "dynamique", "journaliste"]
 SUMS = ["S", "SS", "WS"]
 
 
+APOSTROPHES = str.maketrans({c: "'" for c in "’‘ʼʻ`´′＇"})
+
+
+def norm_apos(s: str) -> str:
+    """Every apostrophe-like character (’ ‘ ʼ ` ´ ′) -> ' (« Giscard d‘Estaing » = « Giscard d'Estaing »)."""
+    return s.translate(APOSTROPHES) if isinstance(s, str) else s
+
+
 def name_key(s: str) -> str:
-    s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode().lower()
+    """Loose key: case, accents, hyphens and apostrophes (any kind: a separator, never dropped) folded."""
+    s = unicodedata.normalize("NFKD", norm_apos(s)).encode("ascii", "ignore").decode().lower()
     return re.sub(r"[^a-z0-9]+", " ", s).strip()
 
 

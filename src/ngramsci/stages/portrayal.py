@@ -17,6 +17,7 @@ import re
 
 import pandas as pd
 
+from ..explorer import norm_apos
 from ..nlp.segments import NAMEOK, build, name_re
 from ..stage import Output, Stage, register
 from ..textio import read_text
@@ -62,12 +63,17 @@ def full_name(surfaces, compounds=frozenset()):
     from ..explorer import name_key
     props = []
     for t in surfaces:
-        t, _ = strip_title(t)
-        if " " in t and NAMEOK.match(t) and t.split()[0].lower().strip("'’") not in STOP and name_key(t) not in compounds:
+        t, _ = strip_title(norm_apos(t))
+        if " " in t and NAMEOK.match(t) and t.split()[0].lower().strip("'") not in STOP and not ELIDED.match(t) \
+                and name_key(t) not in compounds:
             props.append(t)
     if not props:
         return None
     return max(collections.Counter(props).items(), key=lambda kv: (kv[1], len(kv[0])))[0]
+
+
+# a name never starts with an elided article: « L'équipe de France », « L'administration Trump », « L'Oréal »
+ELIDED = re.compile(r"^[Ll]'")
 
 
 def surname_of(name: str) -> str:
@@ -82,8 +88,8 @@ def bare_surname(surfaces, compounds=frozenset(), with_title=False):
     from ..explorer import name_key
     c, fem = collections.Counter(), collections.defaultdict(set)
     for t in surfaces:
-        t, title = strip_title(t)
-        if not t or t.split()[0].lower() in ("son", "sa", "ses", "ce", "cette"):
+        t, title = strip_title(norm_apos(t))
+        if not t or t.split()[0].lower() in ("son", "sa", "ses", "ce", "cette") or t[:2].lower() == "l'":
             continue
         if name_key(t) in compounds or (t.split()[-1][0].isupper() and SURNAME_RE.match(t)):
             c[t] += 1; fem[t].add(title)
@@ -149,7 +155,7 @@ def _chains(text, ents, compounds, min_mentions=1, with_org=False):
             continue
         # a mention running across the title/body separator glues two names (« SarkozyNicolas Sarkozy »): not a name
         surf = [text[int(a):int(b)].strip() for a, b, p in zip(g["onset"], g["offset"], g["prop"]) if p == "PROP"]
-        surf = [t for t in surf if "///" not in t]
+        surf = [norm_apos(t) for t in surf if "///" not in t]
         spans = [(int(a), int(b)) for a, b in zip(g["onset"], g["offset"])]
         name = full_name(surf, compounds)
         if name:
@@ -192,7 +198,14 @@ def people(text, ents, min_mentions=1, surnames=None, year=None, only_surname=Fa
         inner = {n for _, n, _, _ in named if k in name_keys(n)} - fam if k not in common_first else set()
         here = fam | inner
         if k in firsts and not titled:
-            here = set()                                                   # « Philippe » next to « Philippe Martinez »
+            # « Philippe » next to « Philippe Martinez »: unnamed; but a single name (alias / table) next to exactly one
+            # person of that first name is that person (« Dieudonné » next to « Dieudonné M'Bala M'Bala », or « Dieudonné
+            # Niangouna »: not the comedian)
+            own = {n for _, n, _, _ in named if name_key(n.split()[0]) == k}
+            single = surnames is not None and (k in surnames.aliases or surnames.get(k, year))
+            if single and len(own) == 1 and not fem:
+                found.append((ch, own.pop(), spans, "article"))
+            continue
         if len(here) == 1:
             found.append((ch, here.pop(), spans, "article"))
         elif here:
@@ -213,7 +226,7 @@ def name_rows(text, ents, compounds=frozenset()):
     out = {(n, "full") for _, n, _ in named} | {(sn, "other" if org else "bare") for _, sn, _, fem, _, org in bare if not fem}
     o = ents[(ents["cat"] != "PER") & (ents["prop"] == "PROP")]
     for a, b in zip(o["onset"], o["offset"]):
-        t = strip_title(text[int(a):int(b)].strip())[0]
+        t = strip_title(norm_apos(text[int(a):int(b)].strip()))[0]
         if t and "///" not in t and t[0].isupper() and SURNAME_RE.match(t):
             out.add((t, "other"))
     return out
@@ -266,7 +279,7 @@ class Surnames:
 
     @classmethod
     def build(cls, counts: pd.DataFrame, share=0.9, min_n=20, window=1, mono_ratio=0.1, min_person=0.8, min_full=3,
-              aliases=None,
+              mono_first=2, aliases=None,
               exclude=("Le Pen", "Marseille", "Paris", "Lyon", "Toulouse", "Nice", "Bordeaux", "France")):
         """counts: columns year, full_name, n, kind ("full": a « First Last », the default; "bare": a chain's bare name,
         name_rows(); "other": the word tagged as something else than a person). A single name must be a person in
@@ -279,6 +292,7 @@ class Surnames:
         canon = lambda n: aliases.get(name_key(n), n)
         if "kind" not in counts.columns:
             counts = counts.assign(kind="full")
+        counts = counts.assign(full_name=counts["full_name"].map(norm_apos))
         bare = counts[counts["kind"] == "bare"]
         other = counts[counts["kind"] == "other"]
         counts = counts[counts["kind"] == "full"]
@@ -302,7 +316,10 @@ class Surnames:
         bare = bare.assign(name=bare["full_name"].map(lambda n: strip_title(n)[0])).query("name != ''")
         bare = bare.assign(key=bare["name"].map(name_key), name=bare["name"].map(canon))
         fam = counts.groupby("key")["n"].sum().add(bare.groupby("key")["n"].sum(), fill_value=0)
-        ex |= {k for k, v in fam.items() if first.get(k, 0) >= 0.1 * v}
+        # a word also used as a first name is out, unless it is mostly a single name: bare chains >= `mono_first` x its
+        # first-name uses (« Dieudonné »: 2,076 bare articles, 908 as a first name; « Philippe », « Emmanuel »: out)
+        bn_all = bare.groupby("key")["n"].sum()
+        ex |= {k for k, v in fam.items() if first.get(k, 0) >= 0.1 * v and bn_all.get(k, 0) < mono_first * first.get(k, 0)}
         c = counts[~counts["key"].isin(ex)]
         c = c.assign(nk=c["full_name"].map(name_key))
         disp = c.groupby(["nk", "full_name"])["n"].sum().sort_values().groupby(level=0).tail(1)
@@ -356,7 +373,7 @@ class Surnames:
         if "table" not in d:                                   # 2026-11-22 format: the table alone
             d = {"table": d, "compounds": []}
         a = os.path.join(os.path.dirname(os.path.abspath(path)), aliases) if aliases else None
-        return cls({k: {int(y): n for y, n in v.items()} for k, v in d["table"].items()}, d["compounds"],
+        return cls({k: {int(y): norm_apos(n) for y, n in v.items()} for k, v in d["table"].items()}, d["compounds"],
                    d.get("firstnames", ()), load_aliases(a) if a and os.path.exists(a) else None)
 
 

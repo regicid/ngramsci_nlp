@@ -12,4 +12,7 @@ params:
   qwen: {single_process: true}
   quotes: {compute_type: float16, split: chunks}
   portrayal: {seeds: [0], exclude_possessive: true, revision: 678e23cc21ff9026f5a183ef7905ee5a0ac119d3,   # v2, as politique
-              surnames_file: data/surnames.json}
+              surnames_file: data/surnames.json,
+              score_all: true}   # rerun 2026-11-25: every singular chain, name-free -> portrayal_all/ (naming = post-processing)
+layout:
+  portrayal: portrayal_all/shard_{k:05d}.parquet
