@@ -15,7 +15,7 @@ W_nm, S_valence_nm (+ WW_nm, SS_valence_nm, WS_valence_nm): valence_nm = S_valen
 ~22 % of the positive valence mass in the web press (2026-11-23), concentrated in campaign coverage.
 Cells keep sums, not means, so any set of cells merges exactly: mean_k = S_k / W; with article sums (W_d, S_d) the
 article-clustered variance of the mean is sum_d (S_d - mean W_d)^2 / W^2 = (SS - 2 mean WS + mean^2 WW) / W^2.
-WWW = sum_d W_d^3 (and WWW_nm) as well, for moment estimators of the between-person variance tau^2 (BLUP / priors).
+W3 = sum_d W_d^3 (and W3_nm) as well, for moment estimators of the between-person variance tau^2 (BLUP / priors).
 
 Per (key, month, newspaper): n_articles (articles naming the person; several chains of one name in an article count once),
 n_mentions (sum of chain occurrences), n_segments (portrayal passages), W = sum P(pertinent) x passages, and the portrayal
@@ -150,8 +150,8 @@ def one(f):
     per["n_articles"] = 1
     per["WW"] = per["W"] ** 2
     per["WW_nm"], per["SS_valence_nm"], per["WS_valence_nm"] = per["W_nm"] ** 2, per["S_valence_nm"] ** 2, per["W_nm"] * per["S_valence_nm"]
-    per["WWW"], per["WWW_nm"] = per["W"] ** 3, per["W_nm"] ** 3      # sum_d W_d^3: moment estimators of tau (BLUP priors)
-    se = ["WW", "WW_nm", "SS_valence_nm", "WS_valence_nm", "WWW", "WWW_nm"]
+    per["W3"], per["W3_nm"] = per["W"] ** 3, per["W_nm"] ** 3      # sum_d W_d^3: moment estimators of tau (BLUP priors)
+    se = ["WW", "WW_nm", "SS_valence_nm", "WS_valence_nm", "W3", "W3_nm"]
     for k in DIMS:
         per[f"SS_{k}"], per[f"WS_{k}"] = per[f"S_{k}"] ** 2, per["W"] * per[f"S_{k}"]; se += [f"SS_{k}", f"WS_{k}"]
     cells = per.groupby(["key", "month", "newspaper", "section"], sort=False)[["n_articles"] + num + se].sum().reset_index()
@@ -194,7 +194,7 @@ def top(N):
     d["agency"] = (d["agent"] / (d["agent"] + d["patient"])).where(d["agent"] + d["patient"] > 0).round(4)
     d.insert(1, "name", d["key"].map(disp)); d.insert(2, "rank", d["key"].map({k: i + 1 for i, k in enumerate(keep)}))
     d["W"] = d["W"].round(3)
-    d = d.drop(columns=[c for c in d.columns if c in ("WW", "WW_nm", "WWW", "WWW_nm") or c.startswith(("SS_", "WS_"))])
+    d = d.drop(columns=[c for c in d.columns if c in ("WW", "WW_nm", "W3", "W3_nm") or c.startswith(("SS_", "WS_"))])
     d = d.sort_values(["rank", "month", "newspaper", "section"]).reset_index(drop=True)
     d.to_parquet(f"{OUT}/monthly_top{N}.parquet"); d.to_csv(f"{OUT}/monthly_top{N}.csv.gz", index=False)
     print(len(d), "rows,", d.key.nunique(), "names, rank-1000 has", int(tot.iloc[N - 1]), "mentions", flush=True)
