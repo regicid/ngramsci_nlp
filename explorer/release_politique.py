@@ -1,4 +1,4 @@
-"""Build the propp-press release files of politique or presse3 (characters + portrayal, entities), in two steps (cca htc):
+"""Build the propp-press release files of politique, presse3 or presse4 (characters + portrayal, entities), in two steps (cca htc):
   [RELEASE_CORPUS=presse3] python explorer/release_politique.py fetch   -> <W>/cache/release[_presse3]/ (one job)
   [RELEASE_CORPUS=presse3] python explorer/release_politique.py I N     -> <W>/release[_presse3]/data/{characters,entities}_qwen4b/<corpus>/
                                                                          (task I of an array of N, after the fetch: afterok)
@@ -14,7 +14,7 @@ from ngramsci import release as Rl
 from ngramsci.stages.portrayal import Surnames, load_inputs
 SN = Surnames.from_json(os.path.join(os.path.dirname(__file__), "..", "data", "surnames.json"))
 CORPUS = os.environ.get("RELEASE_CORPUS", "politique")
-N_SHARDS = {"politique": 311, "presse3": 642}[CORPUS]
+N_SHARDS = {"politique": 311, "presse3": 642, "presse4": 693}[CORPUS]
 R = f"regicid/qcoref-{CORPUS}-work"; W = os.environ.get("NGRAMSCI_WORK", "/sps/humanum/home/bdecourson/ngramsci_work")
 SUF = "" if CORPUS == "politique" else f"_{CORPUS}"
 TXT, OUT, CACHE = f"{W}/private/{CORPUS}/text", f"{W}/release{SUF}", f"{W}/cache/release{SUF}"
