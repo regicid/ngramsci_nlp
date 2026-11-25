@@ -14,8 +14,13 @@ def one(k, s, g):
     docs, ents = load_inputs(f"{PRIV}/text/shard_{k:05d}.parquet", f"{BOARD}/mentions/shard_{k:05d}.ner.parquet",
                              f"{BOARD}/entities/shard_{k:05d}.parquet", exclude_possessive=True)
     c = pd.read_parquet(f"{Q}/out/characters_{s:05d}_{g}.v3.parquet")
-    allp = f"{BOARD}/portrayal_all/shard_{k:05d}.parquet"        # score_all run, when there is one
-    p = pd.read_parquet(allp if os.path.exists(allp) else f"{BOARD}/portrayal/shard_{k:05d}.parquet")
+    # the score_all rerun (portrayal_all/, from 2026-11-25) only with PORTRAYAL_ALL=1, once every shard is scored: while it
+    # runs, the board holds both and a release must not mix them (score_all passages also need Rl.locate(mode="chain"))
+    allp = f"{BOARD}/portrayal_all/shard_{k:05d}.parquet"
+    if os.environ.get("PORTRAYAL_ALL") == "1":
+        p = Rl.locate(pd.read_parquet(allp), docs, ents, mode="chain")
+    else:
+        p = pd.read_parquet(f"{BOARD}/portrayal/shard_{k:05d}.parquet")
     co = Rl.characters(c, p, docs["date"], sources=Rl.name_sources(docs, ents, SN), newspaper="lemonde")
     f = f"{OUT}/data/characters_qwen4b/lemonde/part-{s:05d}-{g}.parquet"
     co.to_parquet(f, index=False)
