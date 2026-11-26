@@ -1,0 +1,18 @@
+# CNews, Sud Ouest and L'Opinion: every article of the scrape (saclay CSVs of 26 Nov 2026) except those already in the
+# politique corpus (142,848 articles of these outlets, all found and skipped), 2,502,219 articles in 502 shards of
+# <= 5,000: cnews 330,931 = shards 0-66, l_opinion 98,250 = 67-86, sud_ouest 2,073,038 = 87-501
+# (saclay /data/qcoref_presse5/shards/shards.tsv; extractor /data/qcoref_presse5/extract_full.py).
+name: presse5
+n_shards: 502
+hub_repo: regicid/qcoref-presse5-work          # private board
+source: {host: saclay, dir: /data/qcoref_presse5/shards, pattern: "shard_{k:05d}.jsonl.gz"}
+ttl_hours: {parse_ner: 3, qwen: 6}
+params:
+  parse_ner: {k: 10}
+  qwen: {single_process: true}
+  quotes: {compute_type: float16, split: chunks}
+  # every singular person chain, name-free input (naming = post-processing), as decided on 2026-11-23
+  portrayal: {seeds: [0], exclude_possessive: true, revision: 678e23cc21ff9026f5a183ef7905ee5a0ac119d3,
+              surnames_file: data/surnames.json, score_all: true}
+layout:
+  portrayal: portrayal_all/shard_{k:05d}.parquet
