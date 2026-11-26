@@ -18,7 +18,8 @@ CORPORA = ["lemonde", "politique", "presse3", "presse4"]
 def check(db):
     """Row counts per table; SystemExit if a table is unknown or a text column holds anything longer than MAX_TEXT."""
     con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
-    tables = {t for (t,) in con.execute("select name from sqlite_master where type='table'")}
+    # sqlite_* are SQLite's own tables (sqlite_stat1: ANALYZE statistics, from portraits_precompute.py)
+    tables = {t for (t,) in con.execute("select name from sqlite_master where type='table'") if not t.startswith("sqlite_")}
     if tables - TABLES:
         sys.exit(f"unexpected tables {sorted(tables - TABLES)}: not published (could hold text)")
     rows = {}
