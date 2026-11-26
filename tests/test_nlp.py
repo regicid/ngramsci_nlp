@@ -351,3 +351,16 @@ def test_locate_rebuilds_sentences_and_mentions():
     assert list(e["portrayal_sent"]) == [1, 2, 2, 4]           # « Il … il »: one passage, two mention rows
     c = Rl.per_character(again, passages=False)
     assert "portrayal" not in c and int(c["portrayal_n"].iloc[0]) == 3
+
+
+def test_roles_before_a_name():
+    """The NER's PROP span holds the determiner and the role (« le général de Gaulle »): the role is stripped like « M. »
+    (Le Monde 1945: de Gaulle's chains were all unnamed), but not before a common noun (« le président du Conseil »)."""
+    from ngramsci.stages.portrayal import bare_surname, full_name, strip_title
+    assert strip_title("du général de Gaulle") == ("de Gaulle", "général")
+    assert strip_title("l'ancien président Nicolas Sarkozy") == ("Nicolas Sarkozy", "président")
+    assert strip_title("la ministre Dati") == ("Dati", "Mme")
+    for s in ("le président du Conseil", "le ministre d'État", "le président de la République", "Le Pen", "Prince"):
+        assert strip_title(s) == (s, None)
+    assert bare_surname(["le général de Gaulle", "du général de Gaulle"], with_title=True) == ("de Gaulle", False, True)
+    assert full_name(["le président Harry Truman"]) == "Harry Truman"

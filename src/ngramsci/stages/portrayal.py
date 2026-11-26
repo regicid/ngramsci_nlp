@@ -49,9 +49,28 @@ TITLES = {"M.", "M", "MM.", "Mme", "Mmes", "Mlle", "Madame", "Mademoiselle", "Mo
 FEMININE = {"Mme", "Mmes", "Mlle", "Madame", "Mademoiselle"}
 
 
+# a role before a name, with its determiner, inside the NER's PROP span: « le général de Gaulle », « du maréchal Pétain »,
+# « l'ancien président Sarkozy », « Général de Gaulle » (Le Monde 1945: 1,878 « de Gaulle » PROP mentions, 1,550 of
+# them « le/du/au général de Gaulle », unnamed before 2026-11-26). Only when a name follows: an uppercase word or
+# de/von/van + an uppercase word (« le président de Gaulle », not « le président du Conseil », « le ministre d'État »)
+_ROLES = ("g[ée]n[ée]ra[li]|pr[ée]sidente?|vice-pr[ée]sidente?|mar[ée]chal|amiral|colonel|commandant|capitaine|lieutenant|"
+          "sergent|caporal|premier ministre|premi[èe]re ministre|ministre|chanceli[èe]re?|s[ée]nat(?:eur|rice)|d[ée]put[ée]e?|"
+          "maire|gouverneur|ambassadeur|ambassadrice|juge|professeur|cardinal|abb[ée]|pape|roi|reine|prince|princesse")
+ROLE_RE = re.compile(r"^(?:(la|le|les|du|des|au|aux|l')\s*)?(?:(ancien(?:ne)?|ex|future?|feu|nouveau|nouvelle)[\s-]+)?"
+                     rf"({_ROLES})\s+(?=(?-i:(?:(?:de|von|van|der|di|da|del)\s+)?[A-ZÀ-Ý]))", re.I)
+FEMININE_ROLE = re.compile(r"^(?:(?:vice-)?pr[ée]sidente|premi[èe]re ministre|chanceli[èe]re|s[ée]natrice|d[ée]put[ée]e|"
+                           r"ambassadrice|reine|princesse)$", re.I)
+
+
 def strip_title(t: str) -> tuple[str, str | None]:
-    """« Mme Simone Veil » -> (« Simone Veil », « Mme »): titles are never part of a name."""
-    w, title = t.split(), None
+    """« Mme Simone Veil » -> (« Simone Veil », « Mme »), « le général de Gaulle » -> (« de Gaulle », « général »): titles
+    and roles are never part of a name. A feminine role (« la ministre », « l'ancienne présidente ») gives « Mme »."""
+    title = None
+    if m := ROLE_RE.match(t):
+        det, adj, role = (x.lower() if x else "" for x in m.groups())
+        fem = det == "la" or adj in ("ancienne", "future", "nouvelle") or bool(FEMININE_ROLE.match(role))
+        title, t = ("Mme" if fem else role), t[m.end():]
+    w = t.split()
     while w and w[0] in TITLES:
         title = title or w[0]; w = w[1:]
     return " ".join(w), title
