@@ -1,0 +1,21 @@
+# The last national titles: 20 Minutes, BFMTV, Le Nouvel Obs, Atlantico, Challenges, Capital, La Tribune, France-Soir,
+# Marianne, Blast: every article of the scrape (saclay CSVs of 27 Nov 2026) except those already in the politique corpus
+# (285,475 articles of these outlets, all found and skipped), 2,425,638 articles in 489 shards of <= 5,000:
+# 20minutes 774,791 = shards 0-154, atlantico 129,855 = 155-180, bfmtv 648,618 = 181-310, blast 2,446 = 311,
+# challenges 143,280 = 312-340, francesoir 72,294 = 341-355, latribune 73,366 = 356-370, le_capital 131,479 = 371-397,
+# le_nouvel_observateur 430,794 = 398-484, marianne 18,715 = 485-488
+# (saclay /data/qcoref_presse6/shards/shards.tsv; extractor /data/qcoref_presse6/extract_full.py).
+name: presse6
+n_shards: 489
+hub_repo: regicid/qcoref-presse6-work          # private board
+source: {host: saclay, dir: /data/qcoref_presse6/shards, pattern: "shard_{k:05d}.jsonl.gz"}
+ttl_hours: {parse_ner: 3, qwen: 6}
+params:
+  parse_ner: {k: 10}
+  qwen: {single_process: true}
+  quotes: {compute_type: float16, split: chunks}
+  # every singular person chain, name-free input (naming = post-processing), as decided on 2026-11-23
+  portrayal: {seeds: [0], exclude_possessive: true, revision: 678e23cc21ff9026f5a183ef7905ee5a0ac119d3,
+              surnames_file: data/surnames.json, score_all: true}
+layout:
+  portrayal: portrayal_all/shard_{k:05d}.parquet
